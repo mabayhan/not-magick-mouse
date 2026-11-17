@@ -4,187 +4,209 @@ A tiny, resource-efficient mouse button remapper with a tray icon, a simple conf
 
 ## Confirmed requirements
 
-- **OS:** Windows 10/11 (dev happens in WSL; cross-compile or build natively on Windows).
-- **Mouse:** Razer DeathAdder Elite (replacing Razer Synapse).
+- **OS:** Windows 10/11 only for now. Linux support comes later, so the code is structured to allow it (see Portability).
+- **Mouse:** Razer DeathAdder Elite. Razer Synapse is already uninstalled.
 - **Language:** Rust.
-- **Default mapping:** Back button (X1) → `Ctrl+W`.
+- **Default mappings: none.** A fresh install changes no button. The user maps everything through the GUI.
+- **DPI OSD:** shows only the DPI value (e.g. `1600 DPI`). No animation, no fade, no stage bar: it appears and disappears after a timeout.
 
 ## Goals
 
-1. **Global mappings** — remap mouse buttons to keys / combos / actions everywhere.
-2. **Per-app mappings** — override the global profile when a specific app is focused.
-3. **DPI OSD** — show the current DPI on screen (Razer style) when the DPI button is pressed.
-4. **System tray** — runs in the tray with no main window.
-5. **Simple GUI** — pick a button, press the keys you want, save. No hand-editing needed.
+1. **Global mappings**: remap mouse buttons to keys, combos or actions everywhere.
+2. **Per-app mappings**: override the global profile when a specific app is focused.
+3. **DPI OSD**: show the current DPI when the DPI button is pressed.
+4. **System tray**: runs in the tray with no main window.
+5. **Simple GUI**: pick a button, press the keys you want (or choose a named action), save.
 
-Non-goals (v1): timed macros / recording, RGB, firmware flashing, cloud sync.
+Non-goals (v1): timed macros or recording, RGB, firmware flashing, cloud sync, wheel remapping, window-title matching.
 
 ## Design decisions
 
 | Decision | Choice | Why |
 |---|---|---|
-| Process split | **Two executables/modes:** `nmm` daemon (tray + hook + OSD) and `nmm --gui` (config editor) | Daemon stays ~0% CPU and a few MB RAM. The GUI is spawned from the tray on demand and exits when closed, so its heavier toolkit never costs idle memory. |
-| GUI toolkit | **egui/eframe** (glow backend), same binary launched with `--gui` | Pure Rust, tiny code, easy "press a key" capture. Alternative if size/RAM matters more: `slint` or raw Win32. |
-| Config | **TOML**, hot-reloaded by the daemon | GUI writes it, daemon notices via file watcher. Still hand-editable and diffable. |
-| Writes | Atomic (write temp → rename); daemon keeps last good config if a reload fails | A broken file never kills remapping. |
+| Process split | Two executables: `nmm` (daemon: tray, hook, OSD) and `nmm-gui` (config editor) | The daemon stays near 0% CPU and a few MB of RAM. The GUI is launched from the tray on demand and exits when closed. |
+| GUI toolkit | `egui`/`eframe` | Pure Rust, small code, easy "press a key" capture. Only the GUI exe carries it. |
+| Config | TOML at `%APPDATA%\not-magick-mouse\config.toml` | GUI writes it; still hand-editable and diffable. |
+| Config writes | Atomic (write temp file, then rename); daemon keeps the last good config if a reload fails | A broken file never stops remapping. |
+| Reload signal | GUI broadcasts a registered window message (`NMM_RELOAD`) to the daemon; tray also has "Reload config" | Zero polling and no file-watcher dependency. |
+| Tray | Raw `Shell_NotifyIconW` plus a hidden message window | One fewer dependency; the daemon already needs a Win32 message loop for the hooks. |
+| Single instance | Named mutex per exe | Avoids double hooks. |
 
 ## Architecture
 
 ```
           ┌────────────── nmm daemon (always on) ──────────────┐
-          │  tray ── menu: Enable/Disable, Settings…, Quit      │
+          │  tray menu: Enable/Disable, Settings…, Reload, Quit │
           │                                                     │
  mouse ──►│ WH_MOUSE_LL hook ─► profile engine ─► action        │──► SendInput /
           │                      ▲  (global +      injector     │    WM_APPCOMMAND
           │       foreground ────┘   per-app)                   │
           │       watcher (WinEvent)                            │
           │                                                     │
- Razer ──►│ DPI monitor (HID) ─► OSD window (GDI, click-through)│
+ Razer ──►│ DPI thread (hidapi) ─► OSD window (GDI text only)   │
  HID      │                                                     │
-          │ config watcher ◄── config.toml ◄── nmm --gui        │
+          │ NMM_RELOAD msg ◄── config.toml ◄── nmm-gui          │
           └─────────────────────────────────────────────────────┘
 ```
 
-Modules (`src/`):
+Layout: a Cargo workspace.
 
-- `config.rs` — TOML schema, validation, load/save, `notify` watcher, atomic reload.
-- `hook.rs` — low-level mouse hook. Swallow mapped buttons (both down and up), dispatch via channel; callback must return in well under 1 ms.
-- `profiles.rs` — active profile resolution: per-app match (exe name, optional title regex) → fallback to global, **per button** (an app profile only overrides buttons it defines).
-- `foreground.rs` — `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)`; event-driven, no polling.
-- `actions.rs` — action catalog + executor (see below). Injected events are tagged via `dwExtraInfo` to avoid loops.
-- `dpi.rs` — Razer HID listener (see DPI section).
-- `osd.rs` — borderless, topmost, click-through layered window with GDI text; fade out after ~1.5 s; appears on the monitor containing the cursor.
-- `tray.rs` — `tray-icon` crate.
-- `gui/` — egui app (profiles list, button list, action picker, key recorder).
+- `core` (platform-independent, unit-testable anywhere, including WSL): config schema/validation, action model and parsing, key-name tables, profile resolution.
+- `platform-windows`: hook, injector, foreground watcher, tray, OSD, Razer HID.
+- `daemon` (`nmm`): wires core and platform together.
+- `gui` (`nmm-gui`): egui app using `core` for load/save/validate.
 
-Crates (kept short): `windows`, `serde`, `toml`, `notify`, `tray-icon`, `anyhow`, `eframe`/`egui` (GUI only), `hidapi` (DPI).
+Modules:
 
-## Actions: what Windows offers instead of "Ctrl+W"
+- `config` (core): TOML schema, validation, load/save.
+- `actions` (core): action enum, presets, `Combo` parsing (modifiers + key name to virtual-key code).
+- `profiles` (core): `resolve(exe, button) -> Action`. An app profile overrides only the buttons it defines; everything else falls through to global. A profile marked `disabled = true` makes the daemon do nothing in that app.
+- `hook` (windows): low-level mouse hook. Swallows mapped buttons (both down and up), tracks swallowed buttons so a foreground change between down and up cannot leave a stuck button, and ignores events tagged as its own via `dwExtraInfo`. The callback must return in well under 1 ms.
+- `foreground` (windows): `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` to get the exe name of the focused window. Event-driven, no polling.
+- `inject` (windows): `SendInput` for keys and mouse buttons, `WM_APPCOMMAND`, and a process spawn on a separate thread for "run program".
+- `dpi` (windows): Razer HID reader (see DPI section).
+- `osd` (windows): borderless, topmost, click-through layered window with GDI text; shown on the monitor under the cursor; hidden by a timer after `osd_ms`.
+- `tray` (windows): icon and popup menu.
 
-Windows has **no universal "close tab" command**. `Ctrl+W` is only a convention that browsers, editors, Explorer and most tabbed apps implement. So the action picker offers named presets (stored as readable names in the config) alongside raw shortcuts:
+Crates (kept short): `windows`, `serde`, `toml`, `anyhow`, `hidapi` (windows-native backend, no C build), `eframe`/`egui` (GUI only).
+
+## Actions
+
+Windows has no universal "close tab" command. `Ctrl+W` is only a convention that browsers, editors, Explorer and most tabbed apps follow. So the GUI offers named presets alongside raw recorded shortcuts, and per-app overrides cover apps that differ (for example a terminal using `Ctrl+Shift+W`).
 
 | Preset | Sends | Notes |
 |---|---|---|
-| Close tab / document | `Ctrl+W` | De-facto standard; **default for Back button**. Fails in apps that don't use it (e.g. many terminals use `Ctrl+Shift+W`) → handle with a per-app override. |
+| Close tab / document | `Ctrl+W` | De-facto standard. Not applied by default. |
 | Close tab (MDI) | `Ctrl+F4` | Older document-style apps. |
 | Close window | `Alt+F4` | Universal window close. |
-| Browser back / forward | `WM_APPCOMMAND` `BROWSER_BACKWARD/FORWARD` | OS-level, works without hard-coding per-app shortcuts. |
-| Close (app command) | `APPCOMMAND_CLOSE` | Only some apps honour it. |
-| Media / volume | Media keys | Play/pause, next, prev, mute, vol ±. |
-| Virtual desktop / Task view | `Win+Ctrl+←/→`, `Win+Tab` | |
+| Browser back / forward | `WM_APPCOMMAND` | OS-level, no per-app shortcut needed. |
+| Media / volume | media keys | Play/pause, next, previous, mute, volume up/down. |
+| Virtual desktops / Task view | `Win+Ctrl+Left/Right`, `Win+Tab` | |
 | Copy / Paste / Undo / Redo | `Ctrl+C/V/Z/Y` | |
-| Custom shortcut | Recorded in GUI | Any combo of modifiers + key. |
-| Mouse button | Another button | Swap/duplicate buttons. |
-| Run program | Path + args | |
-| Disabled | Swallow the click | |
-| Passthrough | Leave unchanged | |
-
-Per-app overrides make the "tab close" problem a non-issue: global `Ctrl+W`, terminal profile `Ctrl+Shift+W`.
+| Custom shortcut | recorded in GUI | Any modifiers plus one key. |
+| Mouse button | another button | Swap or duplicate buttons. |
+| Run program | path plus args | |
+| Disabled | swallow the click | |
+| Passthrough | leave unchanged | This is the default for every button. |
 
 ## GUI design
 
-Single small window, opened from tray → "Settings…".
+A single small window, opened from tray, "Settings…".
 
 ```
 ┌ Profiles ──────┐ ┌ Buttons: Global ───────────────────────────┐
 │ ▸ Global       │ │ Left        passthrough                     │
 │   chrome.exe   │ │ Right       passthrough                     │
 │   WindowsTerm… │ │ Middle      passthrough                     │
-│ [+ Add app]    │ │ Back (X1)   Close tab (Ctrl+W)     [Change] │
+│ [+ Add app]    │ │ Back (X1)   passthrough            [Change] │
 │                │ │ Forward(X2) passthrough            [Change] │
-│                │ │ DPI button  passthrough            [Change] │
 └────────────────┘ └─────────────────────────────────────────────┘
- [Change] → picker: ( ) Preset ▾   ( ) Record shortcut [● press keys…]
+ [Change] opens: ( ) Preset ▾   ( ) Record shortcut [● press keys…]
 ```
 
-- **Key recorder:** "Record" arms capture; the user presses a combo; modifiers + final key are shown live and committed on release. Esc cancels. Uses window key events inside the GUI (the app is focused during recording, so no global hook needed).
-- **Add app profile:** pick from currently running windows (enumerate top-level windows → exe name + icon) or browse for an `.exe`.
-- **Detect mouse button:** "Press a mouse button" capture so users don't have to know which button is X1/X2 (uses the GUI's own mouse events; extra Razer buttons that only appear as HID are out of scope).
-- Changes apply on **Save**; daemon hot-reloads. Validation errors shown inline.
-- Show a conflict warning when two profiles match the same exe.
+- **Key recorder:** "Record" arms capture; the user presses a combo; modifiers and the final key are shown live and committed on release. Esc cancels. It uses the GUI window's own key events, so no global hook is needed.
+- **Add app profile:** pick from currently running windows (exe name and icon) or browse for an `.exe`.
+- **Detect mouse button:** "Press a mouse button" capture, so the user does not need to know which is X1 or X2.
+- **Save** validates and writes atomically, then notifies the daemon. Errors show inline.
+- A warning appears if two profiles match the same exe.
 
 ## Config sketch
+
+Everything is empty by default; the GUI fills it in.
 
 ```toml
 [settings]
 osd_ms = 1500
-osd_position = "bottom-center"   # corners / center options
-start_with_windows = true
+osd_position = "bottom-center"
+dpi_poll_ms = 500          # 0 disables polling-based DPI detection
+start_with_windows = false
 
 [global]
-x1 = "preset:close_tab"          # Back  → Ctrl+W
-x2 = "passthrough"
+# empty: no button is remapped
 
-[[app]]
-exe = "WindowsTerminal.exe"
-x1 = "key:ctrl+shift+w"
-
-[[app]]
-exe = "game.exe"
-disabled = true                  # daemon does nothing while this app is focused
+# example of what the GUI may write:
+# [global]
+# x1 = "key:ctrl+w"
+#
+# [[app]]
+# exe = "WindowsTerminal.exe"
+# x1 = "key:ctrl+shift+w"
+#
+# [[app]]
+# exe = "game.exe"
+# disabled = true
 ```
 
-Buttons: `left, right, middle, x1, x2, wheel_up/down/left/right`. Action forms: `preset:<name>`, `key:<combo>`, `mouse:<button>`, `run:<path>`, `none`, `passthrough`.
+Buttons: `left, right, middle, x1, x2`. Action forms: `preset:<name>`, `key:<combo>`, `mouse:<button>`, `run:<path>`, `none`, `passthrough`.
 
 ## DPI OSD for the DeathAdder Elite
 
-The Elite's DPI button changes the sensor DPI **in firmware** (5 stages, up to 16,000 DPI). Windows sees no standard event, so the daemon needs the Razer-specific HID channel. Findings to confirm in the spike:
+The Elite changes DPI in firmware, so Windows gets no standard event. The daemon reads the value over Razer's HID protocol. This is reverse-engineered (OpenRazer project) and unverified for this mouse, so Phase 0 confirms it:
 
-- Razer devices speak a documented-by-reverse-engineering protocol (see the **OpenRazer** project) over HID feature reports on the mouse's control interface; "get DPI" is a known command, so the current DPI can be **read**, not guessed.
-- Razer devices also emit a report on DPI-stage change (which Synapse uses). If the Elite does so, we listen for it (event-driven, no polling) and then issue "get DPI".
-- **Synapse conflict:** Synapse may hold the interface or fight over DPI settings. The plan assumes Synapse is uninstalled/stopped; note this in the README.
+- Query: a 90-byte Razer report sent as a HID feature report, command class `0x04`, command `0x85` ("get DPI"), with the device's transaction id (believed `0x3F` for the Elite). The reply holds the X/Y DPI.
+- Detection ladder:
+  1. If the mouse emits an input report on DPI change, listen for it (event-driven) and then query DPI.
+  2. Otherwise poll the query at a low rate (default 500 ms, configurable, 0 to disable). The cost is one tiny HID transaction per tick.
+  3. Last resort: a user-defined list of DPI stages, tracked by DPI button presses. May drift from the real value.
+- Only show the OSD when the value changes after the first read. Retry opening the device every few seconds if it is unplugged.
+- The OSD text is just `<value> DPI`. Window is shown, then hidden by a timer. No animation.
 
-Strategy order:
-1. **Listen for the DPI-change report + read DPI** (preferred, exact).
-2. **Fallback — low-rate poll** (e.g. 4 Hz, only while the mouse has recently moved or a button was pressed) if no change event exists. Slightly more CPU, still negligible.
-3. **Last resort — user-defined stage table** (`dpi_stages = [...]`) tracking presses of the DPI button; may drift.
+## Portability (Linux later)
 
-This is built for the DeathAdder Elite first; other mice would need their own backend.
+- Keep all OS calls behind small traits in `core` (`InputHook`, `Injector`, `FocusWatcher`, `Osd`, `Tray`, `DpiSource`). The Windows crate implements them now.
+- The config format already uses neutral names (buttons, `key:` combos, exe names). Linux would add a backend using evdev/uinput and X11/Wayland focus tracking, plus a different key-code table; combos are stored by key name, not Windows virtual-key code, to make that possible.
+- Nothing in `core` may depend on `windows` types.
 
 ## Phases
 
-### Phase 0 — Spike (DPI feasibility)
-Enumerate Razer HID interfaces (VID `1532`), dump reports while pressing the DPI button, test "get DPI" feature report. Decide strategy 1/2/3. ~half a day; gate for Phase 4.
+### Phase 0: Spike (DPI feasibility)
+Enumerate Razer HID interfaces (VID `1532`), try the "get DPI" feature report on each, and dump input reports while pressing the DPI button. Choose detection strategy 1, 2 or 3. Gate for Phase 4.
 
-### Phase 1 — Core remap + tray (MVP)
-Cargo project, low-level hook, `SendInput` injector, TOML config + hot reload, global profile only, tray menu (Enable/Disable, Settings, Reload, Quit). Back → Ctrl+W working end to end.
+### Phase 1: Core and daemon MVP
+Workspace setup, `core` with tests, hook, injector, tray, config load with reload message. With an empty config, nothing is remapped.
 
-### Phase 2 — Per-app profiles
-Foreground watcher, exe matching (+ optional title regex), per-button fallthrough, "disabled in this app" profile.
+### Phase 2: Per-app profiles
+Foreground watcher, exe matching, per-button fallthrough, "disabled in this app".
 
-### Phase 3 — Config GUI
-`nmm --gui`: profile list, button list, action picker with presets, shortcut recorder, running-app picker, mouse-button detect, save/validate. Tray launches it; single-instance guard.
+### Phase 3: Config GUI
+Profile list, button list, preset and shortcut picker, recorder, running-app picker, mouse-button detect, save, validate, notify daemon. Launched from tray.
 
-### Phase 4 — DPI OSD
-Implement the Phase 0 strategy; OSD window with fade; position/duration settings; multi-monitor.
+### Phase 4: DPI OSD
+Implement the Phase 0 strategy and the plain-text OSD.
 
-### Phase 5 — Polish
-Autostart (HKCU `Run`), single instance, error toasts, portable zip + installer, CI Windows build, README with config reference and Synapse note.
+### Phase 5: Polish
+Autostart (HKCU `Run`), error messages for a bad config, portable zip, CI Windows build, README with config reference.
 
 ### Later
-Import from XMBC, per-profile DPI presets, more mice, Linux backend.
+Linux backend, import from X-Mouse Button Control, wheel/tilt remapping, other mice.
+
+## Build environment note
+
+Development happens in WSL, but this is a Windows program, and this WSL has no C toolchain or sudo. Options, in order of preference:
+
+1. Build natively on Windows (`rustup` with the MSVC target). Hooks, HID and the tray can only be tested there anyway.
+2. In WSL, install `mingw-w64` and build `--target x86_64-pc-windows-gnu`; copy the `.exe` to Windows to run it.
+
+Pure `core` tests need a host C linker (`build-essential`) or must run on Windows.
 
 ## Resource targets
 
-- Daemon idle CPU ≈ 0% (events only); RAM < 10 MB; binary < 2 MB (`opt-level="z"`, LTO, `panic="abort"`, strip). The GUI binary can be larger since it only runs on demand — consider shipping the GUI as a separate exe so the daemon file stays tiny.
-- Hook callback < 1 ms; work happens off the hook thread.
+- Daemon idle CPU near 0% (event-driven; the only timer is the optional DPI poll). RAM under 10 MB. Binary under 2 MB (`opt-level="z"`, LTO, `panic="abort"`, strip).
+- Hook callback under 1 ms; slow work (run program) off the hook thread.
 
 ## Risks
 
 1. **DPI reads:** protocol details unverified for the Elite; mitigated by Phase 0 and the fallback ladder.
-2. **Elevated windows:** a non-elevated hook can't inject into admin windows; document, optionally offer "run as admin".
-3. **Games/anti-cheat:** hooks + injected input can trip anti-cheat; per-app "disabled" profile.
-4. **Hook timeouts:** Windows drops slow low-level hooks; keep the callback minimal.
-5. **Dev environment:** developing in WSL but running on Windows; build with `--target x86_64-pc-windows-gnu` (or natively on Windows) and test the `.exe` on the Windows side. HID and hooks can't be tested inside WSL.
-6. **Razer driver interplay:** Synapse running alongside may override DPI/buttons.
+2. **Elevated windows:** a non-elevated hook cannot inject into admin windows. Document it and optionally offer "run as admin".
+3. **Games and anti-cheat:** hooks and injected input can trip anti-cheat. Use a per-app "disabled" profile.
+4. **Hook timeouts:** Windows drops slow low-level hooks, so the callback stays minimal.
+5. **Testing:** hooks, HID and tray cannot be tested in WSL; needs a Windows run.
 
 ## Testing
 
-- Unit: config parse/validate, profile resolution (global vs per-app per-button fallthrough), combo parsing, preset expansion.
-- Manual checklist: each action type, per-app override, switching foreground apps, hot reload with broken config, GUI recorder (modifier-only, Esc cancel), DPI OSD at each of the 5 stages, multi-monitor, tray menu, autostart.
+- Unit (core): config parse/validate, profile resolution (fallthrough and disabled), combo parsing, preset expansion, empty config means all passthrough.
+- Manual checklist: each action type, per-app override, switching foreground apps, no stuck buttons when focus changes mid-click, reload with a broken config, GUI recorder (modifier-only, Esc cancel), DPI OSD at each stage, multi-monitor, tray menu, autostart.
 
-## Remaining questions
+## Next step
 
-1. Is Razer Synapse still installed? OK to uninstall it for the DPI feature?
-2. Do you want the OSD to show only the DPI number (e.g. `1600 DPI`) or a stage bar too (like Synapse)?
-3. Any other buttons you plan to remap beyond Back → Ctrl+W (e.g. Forward, DPI button, wheel tilt)? The Elite has only 7 buttons, which is a small set.
+Waiting for the go-ahead to execute. Phase 0 (DPI spike) and Phase 1 can start first.
