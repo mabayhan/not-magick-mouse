@@ -1,0 +1,33 @@
+[settings]
+osd_ms = 1500
+osd_position = "bottom-center"
+dpi_poll_ms = 500
+dpi_stages = [800, 1600, 3200]
+start_with_windows = true
+
+[global]
+x1 = "preset:close_tab"
+x2 = "preset:browser_forward"
+middle = "key:ctrl+shift+t"
+
+[[device]]
+id = "vid_1532&pid_005c"
+name = "Razer DeathAdder Elite"
+dpi_stages = [400, 800, 1600, 2400]
+x1 = "key:ctrl+w"
+x2 = "preset:task_view"
+
+[[device]]
+id = "vid_046d&pid_b019"
+name = "MX_Master_2S"
+x1 = "preset:browser_back"
+x2 = "preset:browser_forward"
+middle = "preset:play_pause"
+
+[[app]]
+exe = "WindowsTerminal.exe"
+x1 = "key:ctrl+shift+w"
+
+[[app]]
+exe = "game.exe"
+disabled = true

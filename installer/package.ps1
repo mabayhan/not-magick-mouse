@@ -36,4 +36,7 @@ Remove-Item $zip -ErrorAction SilentlyContinue
 Compress-Archive -Path "$stage\*" -DestinationPath $zip
 Remove-Item $stage -Recurse -Force
 
+# Checksums for the release page.
+Get-FileHash $msi, $zip -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content (Join-Path $dist 'SHA256SUMS.txt')
+
 Write-Host "Created:`n  $msi`n  $zip"

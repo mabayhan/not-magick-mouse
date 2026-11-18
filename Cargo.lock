@@ -1005,7 +1005,7 @@ dependencies = [
 
 [[package]]
 name = "nmm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "nmm-core",
@@ -1015,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "nmm-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -1024,10 +1024,11 @@ dependencies = [
 
 [[package]]
 name = "nmm-gui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "eframe",
+ "image",
  "nmm-core",
  "nmm-platform-windows",
  "winresource",
@@ -1035,7 +1036,7 @@ dependencies = [
 
 [[package]]
 name = "nmm-platform-windows"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "hidapi",
@@ -1045,7 +1046,7 @@ dependencies = [
 
 [[package]]
 name = "nmm-spike"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hidapi",
 ]

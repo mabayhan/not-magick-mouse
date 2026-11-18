@@ -4,6 +4,7 @@
 use crate::inject::{self, TAG};
 use crate::osd::Osd;
 use crate::util::*;
+use crate::devices::{self, Tracker};
 use crate::dpi;
 use nmm_core::config::{Config, default_config_path, saved_config_path};
 use nmm_core::profiles::resolve;
@@ -44,6 +45,7 @@ struct State {
     reload_msg: u32,
     suspend_msg: u32,
     suspended: bool,
+    tracker: Tracker,
 }
 
 const SUSPEND_TIMER: usize = 99;
@@ -68,7 +70,10 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> Option<R> {
 fn handle_button(button: Button, down: bool) -> bool {
     if down {
         let action = with_state(|s| {
-            let a = if s.enabled && !s.suspended { resolve(&s.cfg, s.exe.as_deref(), button) } else { Action::Passthrough };
+            // Which mouse was it? Unknown (None) falls back to global mappings.
+            s.tracker.drain();
+            let device = s.tracker.take(button, true);
+            let a = if s.enabled && !s.suspended { resolve(&s.cfg, s.exe.as_deref(), device.as_deref(), button) } else { Action::Passthrough };
             s.held[idx(button)] = match &a {
                 Action::Passthrough => Held::No,
                 Action::Mouse(t) => Held::Mouse(*t),
@@ -163,7 +168,7 @@ fn custom_cfg() -> Option<std::path::PathBuf> {
 
 fn apply_config(cfg: &Config) {
     set_autostart_if_changed(cfg.settings.start_with_windows);
-    with_state(|s| s.dpi.configure(cfg.settings.dpi_poll_ms, &cfg.settings.dpi_stages));
+    with_state(|s| s.dpi.configure(cfg));
 }
 
 fn set_autostart_if_changed(want: bool) {
@@ -297,8 +302,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 LRESULT(0)
             }
             WM_DPI => {
-                show_osd(&format!("{} DPI", wp.0));
+                let events = with_state(|s| s.dpi.take_events()).unwrap_or_default();
+                if let Some(e) = events.last() {
+                    // With several DPI-capable mice, say which one changed.
+                    show_osd(&if e.multi { format!("{}: {} DPI", e.name, e.dpi) } else { format!("{} DPI", e.dpi) });
+                }
                 LRESULT(0)
+            }
+            WM_INPUT => {
+                with_state(|s| s.tracker.on_wm_input(lp));
+                DefWindowProcW(hwnd, msg, wp, lp) // required so Windows can clean up the input
             }
             WM_COMMAND => {
                 match wp.0 & 0xFFFF {
@@ -381,12 +394,14 @@ pub fn run(explicit_config: Option<std::path::PathBuf>) -> anyhow::Result<bool> 
             reload_msg: reload_message(),
             suspend_msg: suspend_message(),
             suspended: false,
+            tracker: Tracker::default(),
         };
         STATE.with(|s| *s.borrow_mut() = Some(state));
-        poll.configure(cfg.settings.dpi_poll_ms, &cfg.settings.dpi_stages);
+        poll.configure(&cfg);
         apply_config(&cfg);
 
         let _ = Shell_NotifyIconW(NIM_ADD, &tray_icon_data(hwnd));
+        devices::register_raw_mouse(hwnd);
         let _mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), Some(hinst), 0)?;
         let _fg = SetWinEventHook(
             EVENT_SYSTEM_FOREGROUND,

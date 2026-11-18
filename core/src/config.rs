@@ -73,11 +73,50 @@ pub struct AppProfile {
     pub buttons: ButtonMap,
 }
 
+/// Settings for one kind of mouse, matched by its `vid_xxxx&pid_xxxx` key
+/// (see [`device_key`]). Two identical mice share one profile.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DeviceProfile {
+    /// Lower-case hardware key, e.g. `vid_1532&pid_005c`.
+    pub id: String,
+    /// Friendly name, only for display.
+    #[serde(default)]
+    pub name: String,
+    /// Leave this mouse completely alone (all buttons pass through).
+    #[serde(default)]
+    pub disabled: bool,
+    /// DPI values this mouse's DPI button cycles through. Empty falls back to `settings.dpi_stages`.
+    #[serde(default)]
+    pub dpi_stages: Vec<u32>,
+    #[serde(flatten)]
+    pub buttons: ButtonMap,
+}
+
+/// Normalised hardware key for a raw input / HID device path or instance id.
+/// `HID#VID_1532&PID_005C&MI_00#..` -> `vid_1532&pid_005c`;
+/// Bluetooth `..._DEV_VID&02046D_PID&B019_REV..` -> `vid_046d&pid_b019`;
+/// `HID#VEN_06CB&COL01#..` -> `ven_06cb`. `None` when nothing recognisable.
+pub fn device_key(path: &str) -> Option<String> {
+    let up = path.to_ascii_uppercase();
+    // "VID_1532" (USB) or "VID&02046D" (Bluetooth; two-digit source prefix).
+    let field = |tag: &str| -> Option<String> {
+        let i = [format!("{tag}_"), format!("{tag}&")].iter().find_map(|t| up.find(t.as_str()).map(|i| i + t.len()))?;
+        let h: String = up[i..].chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+        (h.len() >= 4).then(|| h[h.len() - 4..].to_ascii_lowercase())
+    };
+    if let (Some(v), Some(p)) = (field("VID"), field("PID")) {
+        return Some(format!("vid_{v}&pid_{p}"));
+    }
+    field("VEN").map(|v| format!("ven_{v}"))
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub settings: Settings,
     pub global: ButtonMap,
+    #[serde(rename = "device", skip_serializing_if = "Vec::is_empty")]
+    pub devices: Vec<DeviceProfile>,
     #[serde(rename = "app", skip_serializing_if = "Vec::is_empty")]
     pub apps: Vec<AppProfile>,
 }
@@ -100,6 +139,12 @@ impl Config {
         for (i, a) in self.apps.iter().enumerate() {
             anyhow::ensure!(!a.exe.trim().is_empty(), "app profile #{} has an empty exe name", i + 1);
         }
+        for (i, d) in self.devices.iter().enumerate() {
+            anyhow::ensure!(!d.id.trim().is_empty(), "mouse profile #{} has an empty id", i + 1);
+            for v in &d.dpi_stages {
+                anyhow::ensure!((100..=30000).contains(v), "DPI value {v} for mouse '{}' is out of range (100-30000)", d.id);
+            }
+        }
         Ok(())
     }
 
@@ -111,7 +156,24 @@ impl Config {
                 out.push(format!("more than one profile matches '{}'; the first wins", a.exe));
             }
         }
+        for (i, d) in self.devices.iter().enumerate() {
+            if self.devices[..i].iter().any(|b| b.id.eq_ignore_ascii_case(&d.id)) {
+                out.push(format!("more than one profile matches mouse '{}'; the first wins", d.id));
+            }
+        }
         out
+    }
+
+    pub fn device(&self, id: &str) -> Option<&DeviceProfile> {
+        self.devices.iter().find(|d| d.id.eq_ignore_ascii_case(id))
+    }
+
+    /// DPI list for a mouse: its own, else the global one (empty = keep the mouse's stages).
+    pub fn dpi_stages_for(&self, id: &str) -> &[u32] {
+        match self.device(id) {
+            Some(d) if !d.dpi_stages.is_empty() => &d.dpi_stages,
+            _ => &self.settings.dpi_stages,
+        }
     }
 
     /// Missing file means the empty default config (nothing remapped).
@@ -296,6 +358,30 @@ disabled = true
         let c = Config::parse("[settings]\ndpi_stages = [800, 2400]").unwrap();
         assert_eq!(c.settings.dpi_stages, vec![800, 2400]);
         assert!(Config::parse("[settings]\ndpi_stages = [5]").is_err());
+    }
+
+    #[test]
+    fn device_keys() {
+        assert_eq!(device_key(r"\\?\HID#VID_1532&PID_005C&MI_00#8&23f72b55&0&0000#{378de44c}").as_deref(), Some("vid_1532&pid_005c"));
+        assert_eq!(
+            device_key(r"\\?\HID#{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&02046D_PID&B019_REV&0006_F2423DEAEA8E&COL02#9&2D68").as_deref(),
+            Some("vid_046d&pid_b019")
+        );
+        assert_eq!(device_key(r"\\?\HID#VEN_06CB&COL01#5&99af808").as_deref(), Some("ven_06cb"));
+        assert_eq!(device_key("garbage"), None);
+    }
+
+    #[test]
+    fn device_profiles() {
+        let c = Config::parse(
+            "[settings]\ndpi_stages=[800]\n[[device]]\nid=\"vid_1532&pid_005c\"\ndpi_stages=[400,1600]\nx1=\"key:ctrl+w\"\n[[device]]\nid=\"vid_045e&pid_07a5\"",
+        )
+        .unwrap();
+        assert_eq!(c.dpi_stages_for("VID_1532&PID_005C"), &[400, 1600]);
+        assert_eq!(c.dpi_stages_for("vid_045e&pid_07a5"), &[800]);
+        assert_eq!(c.dpi_stages_for("other"), &[800]);
+        assert_eq!(Config::parse(&c.to_toml().unwrap()).unwrap(), c);
+        assert!(Config::parse("[[device]]\nid=\"\"").is_err());
     }
 
     #[test]

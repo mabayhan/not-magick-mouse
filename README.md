@@ -4,7 +4,11 @@ A tiny mouse button remapper for Windows with a tray icon, a simple config GUI, 
 
 A fresh install remaps nothing. You map buttons yourself in the GUI.
 
-![icon](assets/icon256.png)
+![Global page](docs/screenshots/global.png)
+
+| Per-mouse profile | Button editor |
+|---|---|
+| ![Mouse page](docs/screenshots/mouse.png) | ![Editor](docs/screenshots/edit-shortcut.png) |
 
 ## Install
 
@@ -15,11 +19,11 @@ Download `not-magick-mouse-<version>-x86_64.msi` and run it (it asks for adminis
 Command-line options (`msiexec` properties):
 
 ```powershell
-msiexec /i not-magick-mouse-0.1.0-x86_64.msi /qb                          # basic UI, defaults
-msiexec /i not-magick-mouse-0.1.0-x86_64.msi /qb ADDLOCAL=ALL             # also start with Windows
-msiexec /i not-magick-mouse-0.1.0-x86_64.msi /qb CONFIGPATH="D:\nmm\config.toml"
-msiexec /i not-magick-mouse-0.1.0-x86_64.msi /qb INSTALLDIR="D:\Tools\nmm"
-msiexec /x not-magick-mouse-0.1.0-x86_64.msi /qb                          # uninstall
+msiexec /i not-magick-mouse-0.2.0-x86_64.msi /qb                          # basic UI, defaults
+msiexec /i not-magick-mouse-0.2.0-x86_64.msi /qb ADDLOCAL=ALL             # also start with Windows
+msiexec /i not-magick-mouse-0.2.0-x86_64.msi /qb CONFIGPATH="D:\nmm\config.toml"
+msiexec /i not-magick-mouse-0.2.0-x86_64.msi /qb INSTALLDIR="D:\Tools\nmm"
+msiexec /x not-magick-mouse-0.2.0-x86_64.msi /qb                          # uninstall
 ```
 
 `CONFIGPATH` makes the shortcuts and the autostart entry pass `--config` to the app. Upgrading is just running a newer MSI.
@@ -49,11 +53,17 @@ The installer definition is `daemon/wix/main.wxs`.
 ## Use
 
 1. Run `nmm.exe`. A tray icon appears. Right-click for Enabled, Settings, Reload config, Open config folder, Start with Windows, Quit.
-2. Open Settings. Pick Global or an app profile, press Change on a button, choose an action, OK, then Save. The daemon reloads automatically.
-3. "Detect a mouse button" lets you click the physical button instead of knowing whether it is X1 or X2. While detecting, remapping is paused so mapped buttons are detected too.
-4. "Custom DPI values": type values such as `800, 1600, 2400, 3200` and Save. The DPI button then cycles through your list instead of the mouse's built-in stages. Leave it empty to keep the built-in stages.
+2. Open Settings. The sidebar lists **Global**, every **mouse** Windows sees (green dot = connected) and your **app** profiles. Pick one, click a button on the mouse drawing (or its label), choose an action, OK, then Save (Ctrl+S). The tray app reloads automatically.
+3. "Detect a button" lets you click the physical button instead of knowing whether it is X1 or X2. While detecting, remapping is paused so mapped buttons are detected too.
+4. DPI stages: type values such as `800, 1600, 2400, 3200` on the Global page (default for every Razer mouse) or on a Razer mouse's own page. The DPI button then cycles through your list instead of the mouse's built-in stages. Leave it empty to keep the built-in stages.
 
-Per-app profiles override only the buttons they define; the rest fall through to Global. A profile marked disabled makes the daemon do nothing in that app (useful for games and anti-cheat).
+### Several mice
+
+Each mouse gets its own profile, matched by hardware id (`vid_xxxx&pid_xxxx`; two identical mice share one). Precedence, most specific first: **app profile, then the mouse's profile, then Global**. Each layer overrides only the buttons it defines, so you can, for example, make the Back button close tabs on the Razer while the Logitech keeps browser-back. A mouse can also be set to "ignore" (all buttons work as normal), and an app profile can switch remapping off in that app.
+
+Which mouse a click came from is read through Windows Raw Input. If Windows does not say (for example input injected by other software), the click is treated as coming from an unknown mouse and only Global applies, so remapping never stops working because of it.
+
+DPI works for every connected Razer mouse independently. With more than one, the on-screen display names the mouse (`DeathAdder Elite: 1600 DPI`); with one it stays plain (`1600 DPI`). Mice plugged in later are picked up within a few seconds.
 
 ## Config location
 
@@ -83,6 +93,14 @@ start_with_windows = false       # the tray toggle and this setting stay in sync
 [global]
 x1 = "key:ctrl+w"
 
+# Per-mouse profile. `id` comes from the GUI (see the "Hardware id" line on a mouse's page).
+[[device]]
+id = "vid_1532&pid_005c"
+name = "Razer DeathAdder Elite"   # display only
+dpi_stages = [400, 800, 1600]     # empty = use settings.dpi_stages
+x1 = "key:ctrl+t"                 # only for this mouse
+# disabled = true                 # leave this mouse alone
+
 [[app]]
 exe = "WindowsTerminal.exe"
 x1 = "key:ctrl+shift+w"
@@ -91,6 +109,8 @@ x1 = "key:ctrl+shift+w"
 exe = "game.exe"
 disabled = true
 ```
+
+`docs/demo-config.toml` is a larger example.
 
 Buttons: `left`, `right`, `middle`, `x1`, `x2`.
 
@@ -106,5 +126,20 @@ Presets: `close_tab`, `close_tab_mdi`, `close_window`, `browser_back`, `browser_
 - A non-elevated daemon cannot inject input into elevated (admin) windows.
 - Hooks and injected input can trip anti-cheat. Add a disabled profile for such games.
 - DPI is read and written over Razer's HID protocol, verified on the DeathAdder Elite (PID 005C). The mouse will not store a custom stage list, so custom stages are applied by the daemon: after you press the DPI button it switches the mouse to the next value in your list within one poll interval (500 ms by default). Other Razer mice may or may not answer.
+- Only Razer mice expose DPI. Other mice (Logitech, Microsoft, touchpads) can be remapped per device but their DPI is not touched.
 - `spike/` holds throwaway probing tools used to learn the HID protocol (`cargo run -p nmm-spike --bin dpi_test` changes your DPI temporarily).
 - The icon is original artwork generated by `assets/make_icon.py`.
+
+## Releasing (automated deployment)
+
+- `.github/workflows/ci.yml` builds and tests on every push to `main` and on pull requests (Windows runner).
+- `.github/workflows/release.yml` runs when you push a tag. It checks that the tag matches the crate version, runs the tests, installs WiX and `cargo-wix`, runs `installer/package.ps1`, uploads `dist/*` as a build artifact and attaches the MSI, the portable zip and `SHA256SUMS.txt` to a release.
+
+```powershell
+# 1. bump `version` in core, platform-windows, daemon, gui (and the path dependency versions)
+# 2. commit, then:
+git tag v0.2.0
+git push origin main --tags
+```
+
+The workflows use standard Actions syntax, so they also run on GitHub, and on Forgejo/Gitea with a Windows runner labelled `windows-latest`. To refresh the README screenshots run `.\installer\screenshots.ps1` (it uses a throw-away demo config, not yours).
