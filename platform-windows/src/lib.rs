@@ -5,6 +5,7 @@ mod devices;
 mod dpi;
 mod inject;
 mod keymap;
+mod logitech;
 mod osd;
 mod util;
 

@@ -6,7 +6,7 @@ mod theme;
 use eframe::egui::{self, Align, Color32, Layout, RichText, Sense, Stroke, vec2};
 use nmm_core::config::{AppDeviceProfile, AppProfile, ButtonMap, Config, DeviceProfile, default_config_path, explicit_config_path, resolve_config_path, set_saved_config_path};
 use nmm_core::keys::Modifier;
-use nmm_core::{Action, Button, Combo, Preset};
+use nmm_core::{Action, Button, Combo, DpiCmd, Preset};
 use nmm_platform_windows::MouseInfo;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -55,10 +55,11 @@ enum Kind {
     Shortcut,
     Mouse,
     Run,
+    Dpi,
 }
 
 impl Kind {
-    const ALL: [Kind; 6] = [Kind::Passthrough, Kind::Disabled, Kind::Preset, Kind::Shortcut, Kind::Mouse, Kind::Run];
+    const ALL: [Kind; 7] = [Kind::Passthrough, Kind::Disabled, Kind::Preset, Kind::Shortcut, Kind::Mouse, Kind::Dpi, Kind::Run];
     fn label(self) -> &'static str {
         match self {
             Kind::Passthrough => "Unchanged",
@@ -67,6 +68,7 @@ impl Kind {
             Kind::Shortcut => "Keyboard shortcut",
             Kind::Mouse => "Other mouse button",
             Kind::Run => "Run program",
+            Kind::Dpi => "Change DPI",
         }
     }
     fn hint(self) -> &'static str {
@@ -77,6 +79,7 @@ impl Kind {
             Kind::Shortcut => "Press the keys you want this button to send.",
             Kind::Mouse => "Make this button act like a different mouse button.",
             Kind::Run => "Start a program each time the button is pressed.",
+            Kind::Dpi => "Change the sensor DPI of the mouse you click (Razer and Logitech HID++ mice).",
         }
     }
 }
@@ -91,6 +94,15 @@ struct Editor {
     recording: bool,
     mouse: Button,
     run: String,
+    dpi: DpiMode,
+    dpi_value: u32,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum DpiMode {
+    Next,
+    Prev,
+    Set,
 }
 
 impl Editor {
@@ -104,6 +116,8 @@ impl Editor {
             recording: false,
             mouse: Button::Middle,
             run: String::new(),
+            dpi: DpiMode::Next,
+            dpi_value: 1600,
         };
         match current {
             None | Some(Action::Passthrough) => {}
@@ -125,6 +139,17 @@ impl Editor {
                 e.kind = Kind::Run;
                 e.run = r.clone();
             }
+            Some(Action::Dpi(c)) => {
+                e.kind = Kind::Dpi;
+                match c {
+                    DpiCmd::Next => e.dpi = DpiMode::Next,
+                    DpiCmd::Prev => e.dpi = DpiMode::Prev,
+                    DpiCmd::Set(v) => {
+                        e.dpi = DpiMode::Set;
+                        e.dpi_value = *v;
+                    }
+                }
+            }
         }
         e
     }
@@ -143,6 +168,11 @@ impl Editor {
                 Ok(Action::Key(Combo::new(&mods, &c.key)))
             }
             Kind::Mouse => Ok(Action::Mouse(self.mouse)),
+            Kind::Dpi => Ok(Action::Dpi(match self.dpi {
+                DpiMode::Next => DpiCmd::Next,
+                DpiMode::Prev => DpiCmd::Prev,
+                DpiMode::Set => DpiCmd::Set(self.dpi_value.clamp(100, 30000)),
+            })),
             Kind::Run if self.run.trim().is_empty() => Err("Enter a program path.".into()),
             Kind::Run => Ok(Action::Run(self.run.trim().to_string())),
         }
@@ -625,13 +655,13 @@ impl App {
                 None => self.dpi_card(
                     ui,
                     "Default DPI stages",
-                    "The DPI button of a Razer mouse cycles through these, in order. Leave empty to keep the mouse's own stages.",
+                    "Used by the Razer DPI button and by the Change DPI actions. Leave empty to keep a Razer's own stages.",
                     None,
                 ),
                 Some(k) => {
                     let capable = self.mice.iter().any(|m| m.key == k && m.dpi_capable) || k.starts_with("vid_1532");
                     if capable {
-                        self.dpi_card(ui, "DPI stages for this mouse", "Overrides the default list. Leave empty to use the default list.", Some(&k));
+                        self.dpi_card(ui, "DPI stages for this mouse", "Used by the DPI button (Razer) and the Change DPI actions. Leave empty to use the default list.", Some(&k));
                     }
                 }
             }
@@ -762,6 +792,17 @@ impl App {
                             ui.selectable_value(&mut ed.mouse, b, b.label());
                         }
                     });
+                }
+                Kind::Dpi => {
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut ed.dpi, DpiMode::Next, "Next stage");
+                        ui.selectable_value(&mut ed.dpi, DpiMode::Prev, "Previous stage");
+                        ui.selectable_value(&mut ed.dpi, DpiMode::Set, "Set to");
+                        if ed.dpi == DpiMode::Set {
+                            ui.add(egui::DragValue::new(&mut ed.dpi_value).range(100..=30000).speed(50).suffix(" DPI"));
+                        }
+                    });
+                    ui.label(muted("Stages come from the DPI list on that mouse's page (or the Global list; 400, 800, 1600, 3200 if neither is set)."));
                 }
                 Kind::Run => {
                     ui.add(egui::TextEdit::singleline(&mut ed.run).hint_text("C:\\path\\app.exe arguments").desired_width(f32::INFINITY));
@@ -903,6 +944,9 @@ fn describe(a: Option<&Action>) -> String {
         Some(Action::Key(c)) => c.to_string(),
         Some(Action::Mouse(b)) => format!("Acts as {}", b.label()),
         Some(Action::Run(r)) => format!("Run {r}"),
+        Some(Action::Dpi(DpiCmd::Next)) => "DPI: next".into(),
+        Some(Action::Dpi(DpiCmd::Prev)) => "DPI: previous".into(),
+        Some(Action::Dpi(DpiCmd::Set(v))) => format!("DPI: {v}"),
     }
 }
 

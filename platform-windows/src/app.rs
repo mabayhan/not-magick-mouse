@@ -69,7 +69,7 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> Option<R> {
 /// does no I/O besides `SendInput`, and never holds the state borrow while injecting.
 fn handle_button(button: Button, down: bool) -> bool {
     if down {
-        let action = with_state(|s| {
+        let (action, device) = with_state(|s| {
             // Which mouse was it? Unknown (None) falls back to global mappings.
             s.tracker.drain();
             let device = s.tracker.take(button, true);
@@ -79,14 +79,18 @@ fn handle_button(button: Button, down: bool) -> bool {
                 Action::Mouse(t) => Held::Mouse(*t),
                 _ => Held::Swallow,
             };
-            a
+            (a, device)
         })
-        .unwrap_or(Action::Passthrough);
+        .unwrap_or((Action::Passthrough, None));
         match action {
             Action::Passthrough => false,
             Action::None => true,
             Action::Mouse(t) => {
                 inject::mouse_button(t, true);
+                true
+            }
+            Action::Dpi(cmd) => {
+                with_state(|s| s.dpi.request(device, cmd));
                 true
             }
             other => {
@@ -305,7 +309,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 let events = with_state(|s| s.dpi.take_events()).unwrap_or_default();
                 if let Some(e) = events.last() {
                     // With several DPI-capable mice, say which one changed.
-                    show_osd(&if e.multi { format!("{}: {} DPI", e.name, e.dpi) } else { format!("{} DPI", e.dpi) });
+                    show_osd(&if let Some(n) = &e.note {
+                        n.clone()
+                    } else if e.multi { format!("{}: {} DPI", e.name, e.dpi) } else { format!("{} DPI", e.dpi) });
                 }
                 LRESULT(0)
             }
@@ -412,6 +418,7 @@ pub fn run(explicit_config: Option<std::path::PathBuf>) -> anyhow::Result<bool> 
             0,
             WINEVENT_OUTOFCONTEXT,
         );
+        dpi::spawn_worker(hwnd.0 as isize, WM_DPI, poll.clone());
         dpi::spawn(hwnd.0 as isize, WM_DPI, poll);
         if let Some(e) = cfg_err {
             show_osd(&e);

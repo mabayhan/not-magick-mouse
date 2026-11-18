@@ -176,6 +176,41 @@ impl FromStr for Preset {
     }
 }
 
+/// Change the DPI of the mouse that was clicked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DpiCmd {
+    /// Next value in the mouse's DPI list (wraps around).
+    Next,
+    /// Previous value (wraps around).
+    Prev,
+    /// A specific value.
+    Set(u32),
+}
+
+impl FromStr for DpiCmd {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s.trim() {
+            "next" => Ok(DpiCmd::Next),
+            "prev" => Ok(DpiCmd::Prev),
+            n => {
+                let v: u32 = n.parse().map_err(|_| format!("unknown DPI command '{n}' (use next, prev or a number)"))?;
+                if (100..=30000).contains(&v) { Ok(DpiCmd::Set(v)) } else { Err(format!("DPI {v} is out of range (100-30000)")) }
+            }
+        }
+    }
+}
+
+impl fmt::Display for DpiCmd {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DpiCmd::Next => f.write_str("next"),
+            DpiCmd::Prev => f.write_str("prev"),
+            DpiCmd::Set(v) => write!(f, "{v}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     /// Leave the button unchanged.
@@ -186,6 +221,8 @@ pub enum Action {
     Key(Combo),
     Mouse(Button),
     Run(String),
+    /// Change the clicked mouse's DPI.
+    Dpi(DpiCmd),
 }
 
 impl FromStr for Action {
@@ -202,6 +239,7 @@ impl FromStr for Action {
             "preset" => Ok(Action::Preset(rest.parse()?)),
             "key" => Ok(Action::Key(rest.parse()?)),
             "mouse" => Ok(Action::Mouse(rest.parse()?)),
+            "dpi" => Ok(Action::Dpi(rest.parse()?)),
             "run" if !rest.trim().is_empty() => Ok(Action::Run(rest.trim().to_string())),
             "run" => Err("run: needs a program path".into()),
             _ => Err(format!("unknown action type '{kind}'")),
@@ -218,6 +256,7 @@ impl fmt::Display for Action {
             Action::Key(c) => write!(f, "key:{c}"),
             Action::Mouse(b) => write!(f, "mouse:{b}"),
             Action::Run(p) => write!(f, "run:{p}"),
+            Action::Dpi(c) => write!(f, "dpi:{c}"),
         }
     }
 }
@@ -255,7 +294,7 @@ mod tests {
 
     #[test]
     fn action_roundtrip() {
-        for s in ["passthrough", "none", "preset:close_tab", "key:ctrl+w", "mouse:middle", "run:C:\\a b\\x.exe"] {
+        for s in ["passthrough", "none", "preset:close_tab", "key:ctrl+w", "mouse:middle", "dpi:next", "dpi:prev", "dpi:1600", "run:C:\\a b\\x.exe"] {
             let a: Action = s.parse().unwrap();
             assert_eq!(a.to_string(), s);
         }
@@ -266,6 +305,8 @@ mod tests {
         assert!("bogus".parse::<Action>().is_err());
         assert!("preset:nope".parse::<Action>().is_err());
         assert!("run:".parse::<Action>().is_err());
+        assert!("dpi:fast".parse::<Action>().is_err());
+        assert!("dpi:50".parse::<Action>().is_err());
     }
 
     #[test]

@@ -20,8 +20,9 @@ x2 = "preset:task_view"
 [[device]]
 id = "vid_046d&pid_b019"
 name = "MX_Master_2S"
-x1 = "preset:browser_back"
-x2 = "preset:browser_forward"
+dpi_stages = [800, 1200, 1600, 2400, 4000]
+x1 = "dpi:prev"
+x2 = "dpi:next"
 middle = "preset:play_pause"
 
 [[app]]

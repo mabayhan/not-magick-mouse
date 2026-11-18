@@ -93,7 +93,8 @@ fn run_program(cmdline: &str) {
 /// that press and release map to press and release.)
 pub fn perform(a: &Action) {
     match a {
-        Action::Passthrough | Action::None | Action::Mouse(_) => {}
+        // `Dpi` is handled by the daemon (it needs the clicked mouse and does HID I/O).
+        Action::Passthrough | Action::None | Action::Mouse(_) | Action::Dpi(_) => {}
         Action::Key(c) => send_combo(c),
         Action::Preset(p) => match p.effect() {
             PresetEffect::Key(c) => send_combo(&c),

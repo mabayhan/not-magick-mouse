@@ -60,11 +60,18 @@ fn device_path(h: HANDLE) -> Option<String> {
     }
 }
 
-/// Product names reported by the HID layer, by key.
-fn product_names() -> HashMap<String, String> {
+/// Product names reported by the HID layer, by key, and the keys of Logitech
+/// mice that expose the HID++ vendor collection (so their DPI can be set).
+fn product_names() -> (HashMap<String, String>, std::collections::HashSet<String>) {
     let mut out = HashMap::new();
+    let mut hidpp = std::collections::HashSet::new();
     if let Ok(api) = hidapi::HidApi::new() {
         for d in api.device_list() {
+            if d.vendor_id() == crate::logitech::LOGI_VID && d.usage_page() == crate::logitech::VENDOR_PAGE {
+                if let Some(k) = device_key(&d.path().to_string_lossy()) {
+                    hidpp.insert(k);
+                }
+            }
             let Some(p) = d.product_string().map(str::trim).filter(|p| !p.is_empty()) else { continue };
             if let Some(k) = device_key(&d.path().to_string_lossy()) {
                 // The mouse collection's name beats a keyboard collection's on the same receiver.
@@ -75,7 +82,7 @@ fn product_names() -> HashMap<String, String> {
             }
         }
     }
-    out
+    (out, hidpp)
 }
 
 /// Mice currently known to Windows, one entry per model (identical mice share a key).
@@ -94,7 +101,7 @@ pub fn list_mice() -> Vec<MouseInfo> {
         }
         handles.truncate(got as usize);
     }
-    let names = product_names();
+    let (names, hidpp) = product_names();
     let mut out: Vec<MouseInfo> = Vec::new();
     for h in handles.iter().filter(|h| h.dwType == RIM_TYPEMOUSE) {
         let Some(path) = device_path(h.hDevice) else { continue };
@@ -110,7 +117,7 @@ pub fn list_mice() -> Vec<MouseInfo> {
             .cloned()
             .or_else(|| vendor_name(&key).map(|v| format!("{v} mouse")))
             .unwrap_or_else(|| format!("Mouse ({key})"));
-        let dpi_capable = key.starts_with("vid_1532");
+        let dpi_capable = key.starts_with("vid_1532") || hidpp.contains(&key);
         out.push(MouseInfo { key, name, dpi_capable });
     }
     out

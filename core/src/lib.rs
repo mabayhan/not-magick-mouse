@@ -8,6 +8,6 @@ pub mod keys;
 pub mod profiles;
 pub mod traits;
 
-pub use action::{Action, Combo, Preset};
+pub use action::{Action, Combo, DpiCmd, Preset};
 pub use button::Button;
 pub use config::Config;
