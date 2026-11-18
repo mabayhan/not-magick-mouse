@@ -170,7 +170,7 @@ Presets: `close_tab`, `close_tab_mdi`, `close_window`, `browser_back`, `browser_
 
 ## Releasing (automated deployment)
 
-- `.github/workflows/ci.yml` runs on every push to `main` and on pull requests: the full app is built and tested on Windows (x64 on `windows-latest`, which is Windows Server 2025 and shares Windows 11's kernel; arm64 on `windows-11-arm`, non-blocking). The platform-independent `nmm-core` crate is also built and tested on Linux and macOS. The tray daemon, hook, OSD and GUI backends are Windows-only today, so Linux and macOS cannot build the full app yet; the core build there keeps those ports possible.
+- `.github/workflows/ci.yml` runs on every push to `main` and on pull requests: the full app is built and tested on Windows (x64 on `windows-latest`, which is Windows Server 2025 and shares Windows 11's kernel; arm64 on `windows-11-arm`, non-blocking). The platform-independent `nmm-core` crate is also built and tested on Linux. The tray daemon, hook, OSD and GUI backends are Windows-only today, so Linux cannot build the full app yet; the core build there keeps a Linux port possible. There is no macOS build.
 - `.github/workflows/release.yml` runs when you push a tag. It checks that the tag matches the crate version, runs the tests, installs WiX and `cargo-wix`, runs `installer/package.ps1`, uploads `dist/*` as a build artifact and attaches the MSI, the portable zip and `SHA256SUMS.txt` to a release.
 
 ```powershell
