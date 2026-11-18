@@ -57,9 +57,31 @@ The installer definition is `daemon/wix/main.wxs`.
 3. "Detect a button" lets you click the physical button instead of knowing whether it is X1 or X2. While detecting, remapping is paused so mapped buttons are detected too.
 4. DPI stages: type values such as `800, 1600, 2400, 3200` on the Global page (default for every Razer mouse) or on a Razer mouse's own page. The DPI button then cycles through your list instead of the mouse's built-in stages. Leave it empty to keep the built-in stages.
 
-### Several mice
+### Several mice: how settings combine
 
-Each mouse gets its own profile, matched by hardware id (`vid_xxxx&pid_xxxx`; two identical mice share one). Precedence, most specific first: **app profile, then the mouse's profile, then Global**. Each layer overrides only the buttons it defines, so you can, for example, make the Back button close tabs on the Razer while the Logitech keeps browser-back. A mouse can also be set to "ignore" (all buttons work as normal), and an app profile can switch remapping off in that app.
+The Settings window opens on **Global**, with no mouse selected. Every mouse is assumed to have five buttons (left, right, middle, back, forward), and what you set there applies to all mice in all apps. The sidebar then narrows the scope:
+
+| You select | You are editing | Applies to |
+|---|---|---|
+| Global only | Global | every mouse, every app |
+| a mouse | that mouse | that mouse, in every app |
+| an app (no mouse) | global + app | every mouse, in that app |
+| a mouse, then an app | mouse + app | that mouse, in that app only |
+
+Picking an app keeps the mouse that is selected; click the mouse again to drop the app, or Global to clear both. The page title always says what you are editing (for example `MX_Master_2S in chrome.exe`).
+
+When a button is pressed, the first layer below that sets it wins (most specific first). A layer only overrides the buttons it defines; anything left unchanged falls through to the next one.
+
+1. this mouse in this app
+2. this app (any mouse)
+3. this mouse (any app)
+4. Global
+
+Example: Back on the Razer closes tabs in Vivaldi (Razer + Vivaldi), Forward on the MX Master closes tabs in Chrome but opens a new tab in Vivaldi (MX + Chrome, MX + Vivaldi), and Back on the MX Master opens an app everywhere (MX profile). Note that an app's setting for *all* mice (layer 2) beats a mouse's setting (layer 3), so use mouse + app (layer 1) when two mice must differ inside one app.
+
+"Ignore" switches exist at every level: a mouse (works as normal everywhere), an app (remapping off in that app) and a mouse in an app.
+
+![Mouse in app](docs/screenshots/mouse-in-app.png)
 
 Which mouse a click came from is read through Windows Raw Input. If Windows does not say (for example input injected by other software), the click is treated as coming from an unknown mouse and only Global applies, so remapping never stops working because of it.
 
@@ -103,7 +125,12 @@ x1 = "key:ctrl+t"                 # only for this mouse
 
 [[app]]
 exe = "WindowsTerminal.exe"
-x1 = "key:ctrl+shift+w"
+x1 = "key:ctrl+shift+w"       # every mouse in this app
+
+[[app.device]]                  # one mouse in this app (most specific)
+id = "vid_046d&pid_b019"
+x2 = "key:ctrl+t"
+# disabled = true               # leave this mouse alone in this app
 
 [[app]]
 exe = "game.exe"

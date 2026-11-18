@@ -4,7 +4,7 @@ mod mouse_art;
 mod theme;
 
 use eframe::egui::{self, Align, Color32, Layout, RichText, Sense, Stroke, vec2};
-use nmm_core::config::{AppProfile, ButtonMap, Config, DeviceProfile, default_config_path, explicit_config_path, resolve_config_path, set_saved_config_path};
+use nmm_core::config::{AppDeviceProfile, AppProfile, ButtonMap, Config, DeviceProfile, default_config_path, explicit_config_path, resolve_config_path, set_saved_config_path};
 use nmm_core::keys::Modifier;
 use nmm_core::{Action, Button, Combo, Preset};
 use nmm_platform_windows::MouseInfo;
@@ -36,13 +36,15 @@ fn main() -> eframe::Result {
     )
 }
 
-#[derive(Clone, PartialEq)]
-enum Sel {
-    Global,
+/// What the pages edit. Nothing selected = Global. A mouse alone = that mouse in
+/// every app. An app alone = every mouse in that app. Both = that mouse in that app.
+#[derive(Clone, PartialEq, Default)]
+struct Scope {
     /// Hardware key of a mouse, e.g. `vid_1532&pid_005c`.
-    Device(String),
-    App(usize),
-    Settings,
+    mouse: Option<String>,
+    app: Option<usize>,
+    /// The Settings page is showing instead.
+    settings: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -155,11 +157,11 @@ struct App {
     path_text: String,
     path_forced: bool,
     cfg: Config,
-    sel: Sel,
+    sel: Scope,
     editor: Option<Editor>,
     detecting: bool,
     /// Which page `dpi_text` belongs to.
-    dpi_for: Option<Sel>,
+    dpi_for: Option<Scope>,
     dpi_text: String,
     suspend_sent: Option<Instant>,
     new_exe: String,
@@ -184,7 +186,7 @@ impl App {
             path_forced: forced,
             path,
             cfg,
-            sel: Sel::Global,
+            sel: Scope::default(),
             editor: None,
             detecting: false,
             dpi_for: None,
@@ -204,16 +206,19 @@ impl App {
     }
 
     /// `NMM_GUI_PAGE` opens a given page (used to take the README screenshots):
-    /// `global`, `settings`, `mouse:<index or id>`, `app:<n>`, optionally followed by `+edit:<button>`.
+    /// `global`, `settings`, `mouse:<index or id>`, `app:<n>` (comma-separate to combine), optionally followed by `+edit:<button>`.
     fn with_start_page(mut self) -> App {
         let Ok(v) = std::env::var("NMM_GUI_PAGE") else { return self };
         let (page, edit) = v.split_once("+edit:").map_or((v.as_str(), None), |(p, e)| (p, Some(e)));
-        self.sel = match page.split_once(':') {
-            Some(("mouse", n)) => Sel::Device(n.parse::<usize>().ok().and_then(|n| self.mice.get(n)).map_or(n.to_string(), |m| m.key.clone())),
-            Some(("app", n)) => n.parse::<usize>().ok().filter(|n| *n < self.cfg.apps.len()).map_or(Sel::Global, Sel::App),
-            _ if page == "settings" => Sel::Settings,
-            _ => Sel::Global,
-        };
+        let mut sel = Scope::default();
+        for part in page.split(',') {
+            match part.split_once(':') {
+                Some(("mouse", n)) => sel.mouse = Some(n.parse::<usize>().ok().and_then(|n| self.mice.get(n)).map_or(n.to_string(), |m| m.key.clone())),
+                Some(("app", n)) => sel.app = n.parse::<usize>().ok().filter(|n| *n < self.cfg.apps.len()),
+                _ => sel.settings = part == "settings",
+            }
+        }
+        self.sel = sel;
         if let Some(b) = edit.and_then(|e| e.parse::<Button>().ok()) {
             self.editor = Some(Editor::from(b, self.map().get(b)));
         }
@@ -235,23 +240,64 @@ impl App {
         self.cfg.devices.len() - 1
     }
 
+    /// Index of a mouse's overrides inside an app, creating them on first use.
+    fn ensure_app_device(&mut self, app: usize, key: &str) -> usize {
+        let devs = &mut self.cfg.apps[app].devices;
+        if let Some(i) = devs.iter().position(|d| d.id.eq_ignore_ascii_case(key)) {
+            return i;
+        }
+        devs.push(AppDeviceProfile { id: key.to_string(), ..Default::default() });
+        devs.len() - 1
+    }
+
     fn map_mut(&mut self) -> &mut ButtonMap {
-        match self.sel.clone() {
-            Sel::Device(k) => {
+        match (self.sel.mouse.clone(), self.sel.app) {
+            (Some(k), Some(a)) => {
+                let j = self.ensure_app_device(a, &k);
+                &mut self.cfg.apps[a].devices[j].buttons
+            }
+            (Some(k), None) => {
                 let i = self.ensure_device(&k);
                 &mut self.cfg.devices[i].buttons
             }
-            Sel::App(i) => &mut self.cfg.apps[i].buttons,
-            _ => &mut self.cfg.global,
+            (None, Some(a)) => &mut self.cfg.apps[a].buttons,
+            (None, None) => &mut self.cfg.global,
         }
     }
 
     fn map(&self) -> &ButtonMap {
-        match &self.sel {
-            Sel::Device(k) => self.cfg.device(k).map(|d| &d.buttons).unwrap_or(&EMPTY_MAP),
-            Sel::App(i) => &self.cfg.apps[*i].buttons,
-            _ => &self.cfg.global,
+        match (&self.sel.mouse, self.sel.app) {
+            (Some(k), Some(a)) => self.cfg.apps[a].device(k).map(|d| &d.buttons).unwrap_or(&EMPTY_MAP),
+            (Some(k), None) => self.cfg.device(k).map(|d| &d.buttons).unwrap_or(&EMPTY_MAP),
+            (None, Some(a)) => &self.cfg.apps[a].buttons,
+            (None, None) => &self.cfg.global,
         }
+    }
+
+    /// "Ignore" flag for the current scope (not meaningful for Global).
+    fn scope_disabled(&self) -> bool {
+        match (&self.sel.mouse, self.sel.app) {
+            (Some(k), Some(a)) => self.cfg.apps[a].device(k).is_some_and(|d| d.disabled),
+            (Some(k), None) => self.cfg.device(k).is_some_and(|d| d.disabled),
+            (None, Some(a)) => self.cfg.apps[a].disabled,
+            (None, None) => false,
+        }
+    }
+
+    fn set_scope_disabled(&mut self, v: bool) {
+        match (self.sel.mouse.clone(), self.sel.app) {
+            (Some(k), Some(a)) => {
+                let j = self.ensure_app_device(a, &k);
+                self.cfg.apps[a].devices[j].disabled = v;
+            }
+            (Some(k), None) => {
+                let i = self.ensure_device(&k);
+                self.cfg.devices[i].disabled = v;
+            }
+            (None, Some(a)) => self.cfg.apps[a].disabled = v,
+            (None, None) => {}
+        }
+        self.dirty = true;
     }
 
     fn mouse_name(&self, key: &str) -> String {
@@ -303,7 +349,7 @@ impl App {
         }
         let how = if let Some(c) = loaded {
             self.cfg = c;
-            self.sel = Sel::Global;
+            self.sel = Scope::default();
             self.editor = None;
             self.dpi_for = None;
             self.dirty = false;
@@ -323,11 +369,13 @@ impl App {
             return;
         }
         if let Some(i) = self.cfg.apps.iter().position(|a| a.exe.eq_ignore_ascii_case(exe)) {
-            self.sel = Sel::App(i);
+            self.sel.app = Some(i);
+            self.sel.settings = false;
             return;
         }
         self.cfg.apps.push(AppProfile { exe: exe.to_string(), ..Default::default() });
-        self.sel = Sel::App(self.cfg.apps.len() - 1);
+        self.sel.app = Some(self.cfg.apps.len() - 1);
+        self.sel.settings = false;
         self.editor = None;
         self.dirty = true;
     }
@@ -348,8 +396,9 @@ impl App {
         ui.add_space(14.0);
 
         group_label(ui, "EVERYTHING");
-        if nav_item(ui, self.sel == Sel::Global, "Global", "All mice, all apps", None).clicked() {
-            self.sel = Sel::Global;
+        let global = self.sel == Scope::default();
+        if nav_item(ui, global, "Global", "Every mouse, every app", None).clicked() {
+            self.sel = Scope::default();
             self.editor = None;
         }
 
@@ -374,8 +423,10 @@ impl App {
             };
             let dot = if connected.is_some() { OK } else { MUTED.gamma_multiply(0.6) };
             let name = self.mouse_name(&k);
-            if nav_item(ui, self.sel == Sel::Device(k.clone()), &name, sub, Some(dot)).clicked() {
-                self.sel = Sel::Device(k);
+            let on = !self.sel.settings && self.sel.mouse.as_deref() == Some(k.as_str());
+            if nav_item(ui, on, &name, sub, Some(dot)).clicked() {
+                // A mouse on its own: that mouse in every app.
+                self.sel = Scope { mouse: Some(k), app: None, settings: false };
                 self.editor = None;
             }
         }
@@ -385,18 +436,31 @@ impl App {
         let mut remove = None;
         for i in 0..self.cfg.apps.len() {
             let a = &self.cfg.apps[i];
-            let sub = if a.disabled { "Remapping off" } else { "Overrides" };
-            let (resp, x) = nav_item_removable(ui, self.sel == Sel::App(i), &a.exe, sub);
+            let sub = match &self.sel.mouse {
+                _ if a.disabled => "Remapping off".to_string(),
+                Some(k) if a.device(k).is_some_and(|d| d.buttons != ButtonMap::default() || d.disabled) => "Customised for this mouse".to_string(),
+                Some(k) => format!("For {}", self.mouse_name(k)),
+                None => "Every mouse".to_string(),
+            };
+            let on = !self.sel.settings && self.sel.app == Some(i);
+            let (resp, x) = nav_item_removable(ui, on, &self.cfg.apps[i].exe, &sub);
             if x {
                 remove = Some(i);
             } else if resp.clicked() {
-                self.sel = Sel::App(i);
+                // An app keeps the selected mouse: mouse + app, or just the app.
+                self.sel.app = Some(i);
+                self.sel.settings = false;
                 self.editor = None;
             }
         }
         if let Some(i) = remove {
             self.cfg.apps.remove(i);
-            self.sel = Sel::Global;
+            self.sel.app = match self.sel.app {
+                Some(a) if a == i => None,
+                Some(a) if a > i => Some(a - 1),
+                other => other,
+            };
+            self.dpi_for = None;
             self.editor = None;
             self.dirty = true;
         }
@@ -432,13 +496,11 @@ impl App {
             }
         }
 
-        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-            ui.add_space(6.0);
-            if nav_item(ui, self.sel == Sel::Settings, "Settings", "Overlay, config file", None).clicked() {
-                self.sel = Sel::Settings;
-                self.editor = None;
-            }
-        });
+        ui.add_space(10.0);
+        if nav_item(ui, self.sel.settings, "Settings", "Overlay, config file", None).clicked() {
+            self.sel.settings = true;
+            self.editor = None;
+        }
     }
 
     // ---------- pages ----------
@@ -522,52 +584,58 @@ impl App {
         });
     }
 
-    fn page_global(&mut self, ui: &mut egui::Ui) -> Option<Button> {
-        self.header(ui, "Global", "Applies to every mouse in every app, unless a more specific profile overrides it.", true);
-        let clicked = self.buttons_card(ui);
-        self.dpi_card(
-            ui,
-            "Default DPI stages",
-            "The DPI button of a Razer mouse cycles through these, in order. Leave empty to keep the mouse's own stages.",
-            None,
-        );
-        clicked
-    }
+    /// The page for the current scope (Global, mouse, app, or mouse + app).
+    fn page_scope(&mut self, ui: &mut egui::Ui) -> Option<Button> {
+        let mouse = self.sel.mouse.clone();
+        let app = self.sel.app.filter(|a| *a < self.cfg.apps.len());
+        let exe = app.map(|a| self.cfg.apps[a].exe.clone());
+        let mouse_name = mouse.as_ref().map(|k| self.mouse_name(k));
+        let (title, sub) = match (&mouse_name, &exe) {
+            (None, None) => ("Global".to_string(), "Every mouse in every app, unless a more specific setting overrides it.".to_string()),
+            (Some(m), None) => (m.clone(), "Only this mouse, in every app. An app's own setting for all mice still wins.".to_string()),
+            (None, Some(e)) => (e.clone(), "Every mouse, while this app is focused. Unchanged buttons fall back to the mouse and Global settings.".to_string()),
+            (Some(m), Some(e)) => (format!("{m}  in  {e}"), "Only this mouse, only in this app. The most specific setting: it beats everything else.".to_string()),
+        };
+        self.header(ui, &title, &sub, true);
 
-    fn page_device(&mut self, ui: &mut egui::Ui, key: String) -> Option<Button> {
-        let info = self.mice.iter().find(|m| m.key == key).cloned();
-        let name = self.mouse_name(&key);
-        let sub = if info.is_some() { "Connected. These buttons only change for this mouse." } else { "Not connected right now. Its settings are kept." };
-        self.header(ui, &name, sub, true);
-        let disabled = self.cfg.device(&key).is_some_and(|d| d.disabled);
-        let clicked = if disabled { None } else { self.buttons_card(ui) };
-        theme::card(ui, |ui| {
-            let mut d = disabled;
-            if ui.checkbox(&mut d, "Ignore this mouse (every button works as normal)").changed() {
-                let i = self.ensure_device(&key);
-                self.cfg.devices[i].disabled = d;
-                self.dirty = true;
-            }
-            ui.label(muted(format!("Hardware id: {key}. Identical mice share one profile. Buttons you leave unchanged fall back to Global.")));
-        });
-        if info.as_ref().is_some_and(|m| m.dpi_capable) || key.starts_with("vid_1532") {
-            self.dpi_card(ui, "DPI stages for this mouse", "Overrides the default list. Leave empty to use the default list.", Some(&key));
-        }
-        clicked
-    }
-
-    fn page_app(&mut self, ui: &mut egui::Ui, i: usize) -> Option<Button> {
-        let exe = self.cfg.apps[i].exe.clone();
-        self.header(ui, &exe, "Applies while this app is focused. Buttons left unchanged fall back to the mouse and Global profiles.", true);
-        let off = self.cfg.apps[i].disabled;
+        let off = self.scope_disabled();
         let clicked = if off { None } else { self.buttons_card(ui) };
-        theme::card(ui, |ui| {
-            let mut d = off;
-            if ui.checkbox(&mut d, "Turn remapping off in this app (good for games and anti-cheat)").changed() {
-                self.cfg.apps[i].disabled = d;
-                self.dirty = true;
+
+        // The "turn it off here" switch for this scope.
+        if mouse.is_some() || app.is_some() {
+            let label = match (&mouse, app) {
+                (Some(_), None) => "Ignore this mouse (every button works as normal)",
+                (None, Some(_)) => "Turn remapping off in this app (good for games and anti-cheat)",
+                _ => "Ignore this mouse in this app",
+            };
+            theme::card(ui, |ui| {
+                let mut d = off;
+                if ui.checkbox(&mut d, label).changed() {
+                    self.set_scope_disabled(d);
+                }
+                if let Some(k) = &mouse {
+                    ui.label(muted(format!("Hardware id: {k}. Identical mice share one profile.")));
+                }
+            });
+        }
+
+        // DPI belongs to a mouse (or the global default), not to an app.
+        if app.is_none() {
+            match mouse {
+                None => self.dpi_card(
+                    ui,
+                    "Default DPI stages",
+                    "The DPI button of a Razer mouse cycles through these, in order. Leave empty to keep the mouse's own stages.",
+                    None,
+                ),
+                Some(k) => {
+                    let capable = self.mice.iter().any(|m| m.key == k && m.dpi_capable) || k.starts_with("vid_1532");
+                    if capable {
+                        self.dpi_card(ui, "DPI stages for this mouse", "Overrides the default list. Leave empty to use the default list.", Some(&k));
+                    }
+                }
             }
-        });
+        }
         clicked
     }
 
@@ -633,11 +701,14 @@ impl App {
     // ---------- editor dialog ----------
 
     fn editor_dialog(&mut self, ctx: &egui::Context) {
-        let name = match &self.sel {
-            Sel::Device(k) => format!(" ({})", self.mouse_name(k)),
-            Sel::App(i) => format!(" ({})", self.cfg.apps[*i].exe),
-            _ => String::new(),
-        };
+        let mut parts = Vec::new();
+        if let Some(k) = &self.sel.mouse {
+            parts.push(self.mouse_name(k));
+        }
+        if let Some(a) = self.sel.app.filter(|a| *a < self.cfg.apps.len()) {
+            parts.push(self.cfg.apps[a].exe.clone());
+        }
+        let name = if parts.is_empty() { String::new() } else { format!(" ({})", parts.join(" in ")) };
         let Some(ed) = self.editor.as_mut() else { return };
         let mut apply: Option<(Button, Action)> = None;
         let mut close = false;
@@ -920,7 +991,7 @@ impl eframe::App for App {
                 egui::Event::PointerButton { button, pressed: true, .. } if self.detecting => {
                     let b = pointer_button(*button);
                     self.detecting = false;
-                    if matches!(self.sel, Sel::Global | Sel::Device(_) | Sel::App(_)) {
+                    if !self.sel.settings {
                         self.editor = Some(Editor::from(b, self.map().get(b)));
                     }
                 }
@@ -1004,12 +1075,10 @@ impl eframe::App for App {
         egui::CentralPanel::default().frame(egui::Frame::new().fill(BG).inner_margin(egui::Margin::symmetric(26, 20))).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 let mut clicked = None;
-                match self.sel.clone() {
-                    Sel::Global => clicked = self.page_global(ui),
-                    Sel::Device(k) => clicked = self.page_device(ui, k),
-                    Sel::App(i) if i < self.cfg.apps.len() => clicked = self.page_app(ui, i),
-                    Sel::App(_) => self.sel = Sel::Global,
-                    Sel::Settings => self.page_settings(ui),
+                if self.sel.settings {
+                    self.page_settings(ui);
+                } else {
+                    clicked = self.page_scope(ui);
                 }
                 if let Some(b) = clicked {
                     self.detecting = false;

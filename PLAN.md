@@ -214,3 +214,15 @@ Pure `core` tests need a host C linker (`build-essential`) or must run on Window
 - Verified by automated tests (core, key map, GUI key mapping) and a smoke run (daemon up, single instance enforced, bad config reload survived, GUI opens).
 - **Not yet verified by hand:** the manual checklist under Testing (each action type, per-app override, stuck-button check, OSD on a real DPI change, multi-monitor, tray menu, recorder). Daemon RAM is about 17 MB, above the 10 MB target.
 - **Not done:** CI workflow, portable zip, a custom tray icon (uses the default application icon), and the `InputHook`/`Injector`-style traits are declared in `core` but the Windows crate does not implement them yet.
+
+## Multiple mice and profile scopes (v0.2)
+
+Two or more mice can be connected at once. Settings are layered by scope.
+
+- **GUI selection model.** The window opens on Global with no mouse selected; every mouse is assumed to have five buttons. Selecting a mouse edits that mouse in every app. Selecting an app keeps the selected mouse, giving mouse + app; with no mouse it is global + app. Clicking the mouse again drops the app, Global clears both.
+- **Resolution order** (first layer that defines the button wins; each layer only overrides what it defines): mouse + app, app (any mouse), mouse (any app), Global. Disabled flags exist on the mouse, the app and the mouse-in-app, and turn remapping off for that scope.
+- **Config.** `[[device]]` (id = `vid_xxxx&pid_xxxx`, optional `name`, `disabled`, `dpi_stages`, buttons) and `[[app.device]]` nested under an app (id, `disabled`, buttons). Identical mice share an id. Everything is optional, so old configs load unchanged.
+- **Which mouse clicked.** The low-level hook cannot tell, so the daemon also registers for Raw Input and keeps a short list of recent button transitions tagged with the device. The hook claims the matching entry (it first drains the thread's raw input buffer so the entry exists even if `WM_INPUT` has not been dispatched). No match means "unknown mouse": only Global and app (any mouse) layers apply, so remapping never depends on this lookup. Risk: relies on Windows queuing raw input before the hook runs; needs real-hardware confirmation.
+- **DPI.** One poller thread tracks every Razer mouse (mouse collection interface per device), rescans every 5 s for hot-plug, applies per-mouse stage lists falling back to the global list, and the OSD names the mouse only when more than one is connected.
+- **Deployment.** CI on push/PR and a tag-driven release workflow that builds the MSI and portable zip (`installer/package.ps1`), documented in the README.
+

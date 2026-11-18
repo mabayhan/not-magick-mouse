@@ -19,6 +19,7 @@ New-Item -ItemType Directory -Force docs\screenshots | Out-Null
 $shots = @(
   @('global',        'global'),
   @('mouse',         'mouse:vid_1532&pid_005c'),
+  @('mouse-in-app',  'mouse:vid_046d&pid_b019,app:0'),
   @('edit-shortcut', 'global+edit:middle'),
   @('settings',      'settings')
 )

@@ -63,6 +63,18 @@ impl ButtonMap {
     }
 }
 
+/// Buttons of one mouse inside one app (`[[app.device]]`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AppDeviceProfile {
+    /// Hardware key of the mouse, see [`device_key`].
+    pub id: String,
+    /// Leave this mouse alone while this app is focused.
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(flatten)]
+    pub buttons: ButtonMap,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AppProfile {
     pub exe: String,
@@ -71,6 +83,15 @@ pub struct AppProfile {
     pub disabled: bool,
     #[serde(flatten)]
     pub buttons: ButtonMap,
+    /// Per-mouse overrides inside this app.
+    #[serde(default, rename = "device", skip_serializing_if = "Vec::is_empty")]
+    pub devices: Vec<AppDeviceProfile>,
+}
+
+impl AppProfile {
+    pub fn device(&self, id: &str) -> Option<&AppDeviceProfile> {
+        self.devices.iter().find(|d| d.id.eq_ignore_ascii_case(id))
+    }
 }
 
 /// Settings for one kind of mouse, matched by its `vid_xxxx&pid_xxxx` key

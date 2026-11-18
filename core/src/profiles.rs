@@ -8,9 +8,10 @@ use crate::config::Config;
 /// `device` is the hardware key of the mouse that produced the click
 /// (`vid_xxxx&pid_xxxx`), `None` when it could not be identified.
 ///
-/// Precedence, most specific first: an app profile, then the mouse's own
-/// profile, then global. Each layer overrides only the buttons it defines.
-/// A `disabled` app profile or mouse profile makes everything passthrough.
+/// Precedence, most specific first: this mouse inside this app, the app
+/// (any mouse), this mouse (any app), global. Each layer overrides only the
+/// buttons it defines. A `disabled` mouse, app, or mouse-in-app makes
+/// everything passthrough.
 pub fn resolve(cfg: &Config, exe: Option<&str>, device: Option<&str>, button: Button) -> Action {
     let dev = device.and_then(|d| cfg.device(d));
     if dev.is_some_and(|d| d.disabled) {
@@ -20,6 +21,14 @@ pub fn resolve(cfg: &Config, exe: Option<&str>, device: Option<&str>, button: Bu
         if let Some(app) = cfg.apps.iter().find(|a| a.exe.eq_ignore_ascii_case(exe)) {
             if app.disabled {
                 return Action::Passthrough;
+            }
+            if let Some(ad) = device.and_then(|d| app.device(d)) {
+                if ad.disabled {
+                    return Action::Passthrough;
+                }
+                if let Some(a) = ad.buttons.get(button) {
+                    return a.clone();
+                }
             }
             if let Some(a) = app.buttons.get(button) {
                 return a.clone();
@@ -99,6 +108,47 @@ x2 = "key:ctrl+shift+w"
         assert_eq!(r(Some("a.exe"), None, Button::X1), "key:ctrl+w");
         assert_eq!(r(Some("a.exe"), Some("vid_045e&pid_07a5"), Button::X1), "passthrough");
         assert_eq!(r(Some("term.exe"), Some("vid_1532&pid_005c"), Button::X2), "key:ctrl+shift+w");
+    }
+
+    #[test]
+    fn mouse_in_app_layer() {
+        let c = Config::parse(
+            r#"
+[global]
+x2 = "key:ctrl+g"
+[[device]]
+id = "vid_046d&pid_b019"
+x2 = "key:ctrl+d"
+x1 = "key:ctrl+1"
+[[app]]
+exe = "chrome.exe"
+x1 = "key:ctrl+a"
+[[app.device]]
+id = "vid_046d&pid_b019"
+x2 = "key:ctrl+w"
+[[app]]
+exe = "vivaldi.exe"
+[[app.device]]
+id = "vid_046d&pid_b019"
+x2 = "key:ctrl+t"
+[[app.device]]
+id = "vid_1532&pid_005c"
+disabled = true
+"#,
+        )
+        .unwrap();
+        let mx = Some("vid_046d&pid_b019");
+        let rz = Some("vid_1532&pid_005c");
+        let r = |exe, dev, b| resolve(&c, Some(exe), dev, b).to_string();
+        assert_eq!(r("chrome.exe", mx, Button::X2), "key:ctrl+w"); // app + mouse
+        assert_eq!(r("vivaldi.exe", mx, Button::X2), "key:ctrl+t");
+        assert_eq!(r("chrome.exe", mx, Button::X1), "key:ctrl+a"); // app beats mouse
+        assert_eq!(r("chrome.exe", rz, Button::X2), "key:ctrl+g"); // other mouse: global
+        assert_eq!(r("vivaldi.exe", mx, Button::X1), "key:ctrl+1"); // falls to mouse profile
+        assert_eq!(r("vivaldi.exe", rz, Button::X2), "passthrough"); // disabled combo
+        assert_eq!(r("other.exe", mx, Button::X2), "key:ctrl+d"); // mouse, any app
+        let again = Config::parse(&c.to_toml().unwrap()).unwrap();
+        assert_eq!(again, c);
     }
 
     #[test]

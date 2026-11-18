@@ -25,6 +25,22 @@ x2 = "preset:browser_forward"
 middle = "preset:play_pause"
 
 [[app]]
+exe = "chrome.exe"
+x1 = "key:ctrl+w"
+
+# Only the MX Master, only in Chrome: Forward closes the tab.
+[[app.device]]
+id = "vid_046d&pid_b019"
+x2 = "key:ctrl+w"
+
+[[app]]
+exe = "vivaldi.exe"
+
+[[app.device]]
+id = "vid_046d&pid_b019"
+x2 = "key:ctrl+t"
+
+[[app]]
 exe = "WindowsTerminal.exe"
 x1 = "key:ctrl+shift+w"
 
