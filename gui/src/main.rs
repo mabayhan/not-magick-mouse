@@ -31,6 +31,7 @@ fn main() -> eframe::Result {
         opts,
         Box::new(move |cc| {
             theme::apply(&cc.egui_ctx);
+            dark_title_bar(cc);
             Ok(Box::new(App::new(path, forced)))
         }),
     )
@@ -38,6 +39,25 @@ fn main() -> eframe::Result {
 
 /// What the pages edit. Nothing selected = Global. A mouse alone = that mouse in
 /// every app. An app alone = every mouse in that app. Both = that mouse in that app.
+/// Give the window a dark title bar from the start, with the same colour whether or not
+/// the window has focus (Windows 11 otherwise shows white, then black, then dark grey).
+fn dark_title_bar(cc: &eframe::CreationContext<'_>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::*;
+    let Ok(h) = cc.window_handle() else { return };
+    let RawWindowHandle::Win32(w) = h.as_raw() else { return };
+    let hwnd = HWND(w.hwnd.get() as *mut _);
+    let colorref = |c: egui::Color32| u32::from(c.r()) | (u32::from(c.g()) << 8) | (u32::from(c.b()) << 16);
+    let set = |attr: DWMWINDOWATTRIBUTE, v: u32| unsafe {
+        let _ = DwmSetWindowAttribute(hwnd, attr, &v as *const u32 as *const _, 4);
+    };
+    set(DWMWA_USE_IMMERSIVE_DARK_MODE, 1);
+    set(DWMWA_CAPTION_COLOR, colorref(SIDEBAR)); // Windows 11 only; ignored elsewhere
+    set(DWMWA_BORDER_COLOR, colorref(BORDER));
+    set(DWMWA_TEXT_COLOR, colorref(TEXT));
+}
+
 #[derive(Clone, PartialEq, Default)]
 struct Scope {
     /// Hardware key of a mouse, e.g. `vid_1532&pid_005c`.
@@ -55,11 +75,10 @@ enum Kind {
     Shortcut,
     Mouse,
     Run,
-    Dpi,
 }
 
 impl Kind {
-    const ALL: [Kind; 7] = [Kind::Passthrough, Kind::Disabled, Kind::Preset, Kind::Shortcut, Kind::Mouse, Kind::Dpi, Kind::Run];
+    const ALL: [Kind; 6] = [Kind::Passthrough, Kind::Disabled, Kind::Preset, Kind::Shortcut, Kind::Mouse, Kind::Run];
     fn label(self) -> &'static str {
         match self {
             Kind::Passthrough => "Unchanged",
@@ -68,18 +87,16 @@ impl Kind {
             Kind::Shortcut => "Keyboard shortcut",
             Kind::Mouse => "Other mouse button",
             Kind::Run => "Run program",
-            Kind::Dpi => "Change DPI",
         }
     }
     fn hint(self) -> &'static str {
         match self {
             Kind::Passthrough => "The button does what it normally does.",
             Kind::Disabled => "The click is swallowed and does nothing.",
-            Kind::Preset => "Common actions: close tab, back, volume, copy and paste...",
+            Kind::Preset => "Common actions: close tab, back, volume, copy and paste, change DPI...",
             Kind::Shortcut => "Press the keys you want this button to send.",
             Kind::Mouse => "Make this button act like a different mouse button.",
             Kind::Run => "Start a program each time the button is pressed.",
-            Kind::Dpi => "Change the sensor DPI of the mouse you click (Razer and Logitech HID++ mice).",
         }
     }
 }
@@ -94,7 +111,8 @@ struct Editor {
     recording: bool,
     mouse: Button,
     run: String,
-    dpi: DpiMode,
+    /// Set when the Preset choice is one of the DPI entries (instead of `preset`).
+    dpi: Option<DpiMode>,
     dpi_value: u32,
 }
 
@@ -116,7 +134,7 @@ impl Editor {
             recording: false,
             mouse: Button::Middle,
             run: String::new(),
-            dpi: DpiMode::Next,
+            dpi: None,
             dpi_value: 1600,
         };
         match current {
@@ -140,12 +158,12 @@ impl Editor {
                 e.run = r.clone();
             }
             Some(Action::Dpi(c)) => {
-                e.kind = Kind::Dpi;
+                e.kind = Kind::Preset;
                 match c {
-                    DpiCmd::Next => e.dpi = DpiMode::Next,
-                    DpiCmd::Prev => e.dpi = DpiMode::Prev,
+                    DpiCmd::Next => e.dpi = Some(DpiMode::Next),
+                    DpiCmd::Prev => e.dpi = Some(DpiMode::Prev),
                     DpiCmd::Set(v) => {
-                        e.dpi = DpiMode::Set;
+                        e.dpi = Some(DpiMode::Set);
                         e.dpi_value = *v;
                     }
                 }
@@ -158,7 +176,12 @@ impl Editor {
         match self.kind {
             Kind::Passthrough => Ok(Action::Passthrough),
             Kind::Disabled => Ok(Action::None),
-            Kind::Preset => Ok(Action::Preset(self.preset)),
+            Kind::Preset => Ok(match self.dpi {
+                None => Action::Preset(self.preset),
+                Some(DpiMode::Next) => Action::Dpi(DpiCmd::Next),
+                Some(DpiMode::Prev) => Action::Dpi(DpiCmd::Prev),
+                Some(DpiMode::Set) => Action::Dpi(DpiCmd::Set(self.dpi_value.clamp(100, 30000))),
+            }),
             Kind::Shortcut => {
                 let c = self.combo.as_ref().ok_or("Record a shortcut first.")?;
                 let mut mods = c.mods.clone();
@@ -168,11 +191,6 @@ impl Editor {
                 Ok(Action::Key(Combo::new(&mods, &c.key)))
             }
             Kind::Mouse => Ok(Action::Mouse(self.mouse)),
-            Kind::Dpi => Ok(Action::Dpi(match self.dpi {
-                DpiMode::Next => DpiCmd::Next,
-                DpiMode::Prev => DpiCmd::Prev,
-                DpiMode::Set => DpiCmd::Set(self.dpi_value.clamp(100, 30000)),
-            })),
             Kind::Run if self.run.trim().is_empty() => Err("Enter a program path.".into()),
             Kind::Run => Ok(Action::Run(self.run.trim().to_string())),
         }
@@ -759,11 +777,36 @@ impl App {
             ui.add_space(2.0);
             match ed.kind {
                 Kind::Preset => {
-                    egui::ComboBox::from_id_salt("preset").width(300.0).selected_text(ed.preset.label()).show_ui(ui, |ui| {
+                    let current = match ed.dpi {
+                        None => ed.preset.label().to_string(),
+                        Some(DpiMode::Next) => "Change DPI: next stage".to_string(),
+                        Some(DpiMode::Prev) => "Change DPI: previous stage".to_string(),
+                        Some(DpiMode::Set) => "Change DPI: set to a value".to_string(),
+                    };
+                    egui::ComboBox::from_id_salt("preset").width(300.0).selected_text(current).show_ui(ui, |ui| {
                         for p in Preset::ALL {
-                            ui.selectable_value(&mut ed.preset, p, p.label());
+                            if ui.selectable_label(ed.dpi.is_none() && ed.preset == p, p.label()).clicked() {
+                                ed.preset = p;
+                                ed.dpi = None;
+                            }
+                        }
+                        ui.separator();
+                        for (mode, label) in [
+                            (DpiMode::Next, "Change DPI: next stage"),
+                            (DpiMode::Prev, "Change DPI: previous stage"),
+                            (DpiMode::Set, "Change DPI: set to a value"),
+                        ] {
+                            if ui.selectable_label(ed.dpi == Some(mode), label).clicked() {
+                                ed.dpi = Some(mode);
+                            }
                         }
                     });
+                    if let Some(mode) = ed.dpi {
+                        if mode == DpiMode::Set {
+                            ui.add(egui::DragValue::new(&mut ed.dpi_value).range(100..=30000).speed(50).suffix(" DPI"));
+                        }
+                        ui.label(muted("Changes the DPI of the mouse you click (Razer and Logitech HID++). Stages come from the DPI list on that mouse's page, else the Global list, else 400, 800, 1600, 3200."));
+                    }
                 }
                 Kind::Shortcut => {
                     ui.horizontal(|ui| {
@@ -792,17 +835,6 @@ impl App {
                             ui.selectable_value(&mut ed.mouse, b, b.label());
                         }
                     });
-                }
-                Kind::Dpi => {
-                    ui.horizontal(|ui| {
-                        ui.selectable_value(&mut ed.dpi, DpiMode::Next, "Next stage");
-                        ui.selectable_value(&mut ed.dpi, DpiMode::Prev, "Previous stage");
-                        ui.selectable_value(&mut ed.dpi, DpiMode::Set, "Set to");
-                        if ed.dpi == DpiMode::Set {
-                            ui.add(egui::DragValue::new(&mut ed.dpi_value).range(100..=30000).speed(50).suffix(" DPI"));
-                        }
-                    });
-                    ui.label(muted("Stages come from the DPI list on that mouse's page (or the Global list; 400, 800, 1600, 3200 if neither is set)."));
                 }
                 Kind::Run => {
                     ui.add(egui::TextEdit::singleline(&mut ed.run).hint_text("C:\\path\\app.exe arguments").desired_width(f32::INFINITY));

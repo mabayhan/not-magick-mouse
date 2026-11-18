@@ -59,7 +59,7 @@ The installer definition is `daemon/wix/main.wxs`.
 
 ### Changing DPI from a button
 
-Choose **Change DPI** in the button editor: *Next stage*, *Previous stage* or *Set to* a value. It acts on the mouse that was clicked, so a button on the MX Master changes the MX Master's DPI. Nothing is assigned by default; you choose the buttons (for example Back and Forward on the MX Master, set on that mouse's page).
+In the button editor choose **Preset action**, then one of the **Change DPI** entries at the bottom of the list: *next stage*, *previous stage* or *set to a value*. It acts on the mouse that was clicked, so a button on the MX Master changes the MX Master's DPI. Nothing is assigned by default; you choose the buttons (for example Back and Forward on the MX Master, set on that mouse's page).
 
 - **Razer** mice: over Razer's HID protocol (as for the DPI button).
 - **Logitech** mice (tested on an MX Master 2S over Bluetooth, range 200-4000 in steps of 50): over HID++ 2.0 "Adjustable DPI". Close Logitech Options+ / G HUB if they fight over the setting. Values are snapped to what the sensor accepts.
@@ -170,7 +170,7 @@ Presets: `close_tab`, `close_tab_mdi`, `close_window`, `browser_back`, `browser_
 
 ## Releasing (automated deployment)
 
-- `.github/workflows/ci.yml` builds and tests on every push to `main` and on pull requests (Windows runner).
+- `.github/workflows/ci.yml` runs on every push to `main` and on pull requests: the full app is built and tested on Windows (x64 on `windows-latest`, which is Windows Server 2025 and shares Windows 11's kernel; arm64 on `windows-11-arm`, non-blocking). The platform-independent `nmm-core` crate is also built and tested on Linux and macOS. The tray daemon, hook, OSD and GUI backends are Windows-only today, so Linux and macOS cannot build the full app yet; the core build there keeps those ports possible.
 - `.github/workflows/release.yml` runs when you push a tag. It checks that the tag matches the crate version, runs the tests, installs WiX and `cargo-wix`, runs `installer/package.ps1`, uploads `dist/*` as a build artifact and attaches the MSI, the portable zip and `SHA256SUMS.txt` to a release.
 
 ```powershell

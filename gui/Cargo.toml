@@ -10,5 +10,8 @@ eframe = { version = "0.37.0", default-features = false, features = ["glow", "de
 nmm-core = { version = "0.2.0", path = "../core" }
 nmm-platform-windows = { version = "0.2.0", path = "../platform-windows" }
 
+raw-window-handle = "0.6.2"
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+
 [build-dependencies]
 winresource = "0.1.34"

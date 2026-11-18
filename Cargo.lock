@@ -1031,6 +1031,8 @@ dependencies = [
  "image",
  "nmm-core",
  "nmm-platform-windows",
+ "raw-window-handle",
+ "windows",
  "winresource",
 ]
 
