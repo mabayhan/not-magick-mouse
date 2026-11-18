@@ -1,0 +1,13 @@
+[package]
+name = "nmm-gui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts"] }
+nmm-core = { version = "0.1.0", path = "../core" }
+nmm-platform-windows = { version = "0.1.0", path = "../platform-windows" }
+
+[build-dependencies]
+winresource = "0.1.34"

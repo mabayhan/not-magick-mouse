@@ -207,6 +207,10 @@ Pure `core` tests need a host C linker (`build-essential`) or must run on Window
 - Unit (core): config parse/validate, profile resolution (fallthrough and disabled), combo parsing, preset expansion, empty config means all passthrough.
 - Manual checklist: each action type, per-app override, switching foreground apps, no stuck buttons when focus changes mid-click, reload with a broken config, GUI recorder (modifier-only, Esc cancel), DPI OSD at each stage, multi-monitor, tray menu, autostart.
 
-## Next step
+## Status
 
-Waiting for the go-ahead to execute. Phase 0 (DPI spike) and Phase 1 can start first.
+- **Phase 0 done.** On the DeathAdder Elite (PID `005C`), HID interface 0 (usage page 1, usage 2) answers the "get DPI" report with transaction id `0x3F` (reply status `0x02`, DPI big-endian at report bytes 10-11). The feature report fails on the other interfaces. Strategy 2 (polling) is implemented; whether the mouse emits an input report on the DPI button was not tested, so the event-driven option is still open.
+- **Phases 1-4 implemented**, plus autostart and the README from Phase 5. Release sizes: daemon 0.5 MB, GUI 4.9 MB.
+- Verified by automated tests (core, key map, GUI key mapping) and a smoke run (daemon up, single instance enforced, bad config reload survived, GUI opens).
+- **Not yet verified by hand:** the manual checklist under Testing (each action type, per-app override, stuck-button check, OSD on a real DPI change, multi-monitor, tray menu, recorder). Daemon RAM is about 17 MB, above the 10 MB target.
+- **Not done:** CI workflow, portable zip, a custom tray icon (uses the default application icon), and the `InputHook`/`Injector`-style traits are declared in `core` but the Windows crate does not implement them yet.

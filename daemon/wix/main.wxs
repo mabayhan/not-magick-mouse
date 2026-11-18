@@ -1,0 +1,148 @@
+<?xml version='1.0' encoding='windows-1252'?>
+<!--
+  Installer for not-magick-mouse (cargo-wix, WiX Toolset v3).
+
+  Build:   cargo wix -p nmm        (needs the WIX env var or WiX on PATH)
+  Silent:  msiexec /i not-magick-mouse-<ver>-x86_64.msi /qb
+  Options (msiexec properties):
+    CONFIGPATH="D:\path\config.toml"   use a custom config file (shortcuts and autostart pass it on as a config flag)
+    ADDLOCAL=ALL                       also enable "Start with Windows"
+    INSTALLDIR="D:\Tools\nmm"          install elsewhere
+-->
+
+<?if $(sys.BUILDARCH) = x64 or $(sys.BUILDARCH) = arm64 ?>
+    <?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>
+<?else ?>
+    <?define PlatformProgramFilesFolder = "ProgramFilesFolder" ?>
+<?endif ?>
+
+<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
+
+    <Product
+        Id='*'
+        Name='not-magick-mouse'
+        UpgradeCode='2E79605A-F943-4827-BC58-F899D938AFE3'
+        Manufacturer='not-magick-mouse contributors'
+        Language='1033'
+        Codepage='1252'
+        Version='$(var.Version)'>
+
+        <Package Id='*'
+            Keywords='Installer'
+            Description='Tiny mouse button remapper with tray icon and DPI OSD'
+            Manufacturer='not-magick-mouse contributors'
+            InstallerVersion='450'
+            Languages='1033'
+            Compressed='yes'
+            InstallScope='perMachine'
+            SummaryCodepage='1252'
+            />
+
+        <MajorUpgrade
+            Schedule='afterInstallInitialize'
+            DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.'/>
+
+        <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
+        <Property Id='DiskPrompt' Value='not-magick-mouse Installation'/>
+
+        <!-- Optional custom config file; is passed to the app as the config flag on shortcuts and autostart. -->
+        <Property Id='CONFIGPATH' Secure='yes'/>
+        <SetProperty Id='CONFIGARG' After='AppSearch' Value='--config "[CONFIGPATH]"'>CONFIGPATH</SetProperty>
+
+        <Directory Id='TARGETDIR' Name='SourceDir'>
+            <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
+                <Directory Id='APPLICATIONFOLDER' Name='not-magick-mouse'>
+                    <Component Id='binary_daemon' Guid='*'>
+                        <File Id='exe0' Name='nmm.exe' DiskId='1'
+                              Source='$(var.CargoTargetBinDir)\nmm.exe' KeyPath='yes'/>
+                    </Component>
+                    <Component Id='binary_gui' Guid='*'>
+                        <File Id='exe1' Name='nmm-gui.exe' DiskId='1'
+                              Source='$(var.CargoTargetBinDir)\nmm-gui.exe' KeyPath='yes'/>
+                    </Component>
+                    <Component Id='readme' Guid='*'>
+                        <File Id='readme_file' Name='README.md' DiskId='1'
+                              Source='$(sys.SOURCEFILEDIR)..\..\README.md' KeyPath='yes'/>
+                    </Component>
+                </Directory>
+            </Directory>
+
+            <Directory Id='ProgramMenuFolder'>
+                <Directory Id='AppMenuFolder' Name='not-magick-mouse'>
+                    <Component Id='shortcuts' Guid='*'>
+                        <Shortcut Id='daemon_shortcut' Name='not-magick-mouse'
+                                  Description='Mouse button remapper (tray)'
+                                  Target='[APPLICATIONFOLDER]nmm.exe' Arguments='[CONFIGARG]'
+                                  WorkingDirectory='APPLICATIONFOLDER'/>
+                        <Shortcut Id='gui_shortcut' Name='not-magick-mouse Settings'
+                                  Description='Configure buttons, apps and DPI'
+                                  Target='[APPLICATIONFOLDER]nmm-gui.exe' Arguments='[CONFIGARG]'
+                                  WorkingDirectory='APPLICATIONFOLDER'/>
+                        <RemoveFolder Id='remove_menu' On='uninstall'/>
+                        <RegistryValue Root='HKCU' Key='Software\not-magick-mouse'
+                                       Name='shortcuts' Type='integer' Value='1' KeyPath='yes'/>
+                    </Component>
+                </Directory>
+            </Directory>
+        </Directory>
+
+        <!-- Start with Windows (HKCU Run of the installing user). Off by default. -->
+        <DirectoryRef Id='APPLICATIONFOLDER'>
+            <Component Id='autostart' Guid='*'>
+                <RegistryValue Root='HKCU' Key='Software\Microsoft\Windows\CurrentVersion\Run'
+                               Name='not-magick-mouse' Type='string'
+                               Value='"[APPLICATIONFOLDER]nmm.exe" [CONFIGARG]' KeyPath='yes'/>
+            </Component>
+        </DirectoryRef>
+
+        <Feature
+            Id='Binaries'
+            Title='Application'
+            Description='The tray daemon, the settings GUI and Start Menu shortcuts.'
+            Level='1'
+            ConfigurableDirectory='APPLICATIONFOLDER'
+            AllowAdvertise='no'
+            Display='expand'
+            Absent='disallow'>
+            <ComponentRef Id='binary_daemon'/>
+            <ComponentRef Id='binary_gui'/>
+            <ComponentRef Id='readme'/>
+            <ComponentRef Id='shortcuts'/>
+
+            <Feature
+                Id='Autostart'
+                Title='Start with Windows'
+                Description='Start the tray daemon when you sign in.'
+                Level='2'
+                Absent='allow'>
+                <ComponentRef Id='autostart'/>
+            </Feature>
+        </Feature>
+
+        <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
+
+        <Icon Id='ProductICO' SourceFile='$(sys.SOURCEFILEDIR)..\..\assets\icon.ico'/>
+        <Property Id='ARPPRODUCTICON' Value='ProductICO'/>
+
+        <!--
+          "Start not-magick-mouse now" checkbox on the last page. It opens the Start Menu
+          shortcut through explorer.exe so the app runs as the normal user even when
+          setup itself was started from an elevated prompt, and it carries CONFIGPATH.
+        -->
+        <Property Id='WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT' Value='Start not-magick-mouse now'/>
+        <Property Id='WIXUI_EXITDIALOGOPTIONALCHECKBOX' Value='1'/>
+        <CustomAction Id='LaunchApp' Directory='APPLICATIONFOLDER'
+                      ExeCommand='"[WindowsFolder]explorer.exe" "[AppMenuFolder]not-magick-mouse.lnk"'
+                      Return='asyncNoWait'/>
+
+        <UI>
+            <UIRef Id='WixUI_FeatureTree'/>
+            <Publish Dialog='ExitDialog' Control='Finish' Event='DoAction' Value='LaunchApp'>WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
+            <!-- No license dialog: go straight from Welcome to the feature list. -->
+            <Publish Dialog='WelcomeDlg' Control='Next' Event='NewDialog' Value='CustomizeDlg' Order='99'>1</Publish>
+            <Publish Dialog='CustomizeDlg' Control='Back' Event='NewDialog' Value='WelcomeDlg' Order='99'>1</Publish>
+        </UI>
+
+    </Product>
+
+</Wix>
