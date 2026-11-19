@@ -1,11 +1,11 @@
 [package]
 name = "nmm-platform-linux"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
-nmm-core = { version = "0.2.0", path = "../../core" }
+nmm-core = { version = "0.3.0", path = "../../core" }
 
 # The crate is empty on other operating systems so `cargo build --workspace` still works there.
 [target.'cfg(target_os = "linux")'.dependencies]

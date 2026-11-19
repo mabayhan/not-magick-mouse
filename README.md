@@ -44,10 +44,10 @@ Download `not-magick-mouse-<version>-x86_64-setup.exe` and run it (it asks for a
 Command-line options:
 
 ```powershell
-.\not-magick-mouse-0.2.0-x86_64-setup.exe /S                              # silent, defaults
-.\not-magick-mouse-0.2.0-x86_64-setup.exe /S /AUTOSTART=1                 # also start with Windows
-.\not-magick-mouse-0.2.0-x86_64-setup.exe /S /CONFIGPATH=D:\nmm\config.toml
-.\not-magick-mouse-0.2.0-x86_64-setup.exe /S /D=D:\Tools\nmm              # /D= must be last
+.\not-magick-mouse-0.3.0-x86_64-setup.exe /S                              # silent, defaults
+.\not-magick-mouse-0.3.0-x86_64-setup.exe /S /AUTOSTART=1                 # also start with Windows
+.\not-magick-mouse-0.3.0-x86_64-setup.exe /S /CONFIGPATH=D:\nmm\config.toml
+.\not-magick-mouse-0.3.0-x86_64-setup.exe /S /D=D:\Tools\nmm              # /D= must be last
 & "C:\Program Files\not-magick-mouse\uninstall.exe" /S                   # uninstall
 ```
 
@@ -204,7 +204,7 @@ Presets: `close_tab`, `close_tab_mdi`, `close_window`, `browser_back`, `browser_
 ```powershell
 # 1. bump `version` in core, windows/*, linux/* (and the path dependency versions)
 # 2. commit, then:
-git tag v0.2.0
+git tag v0.3.0
 git push origin main --tags
 ```
 
