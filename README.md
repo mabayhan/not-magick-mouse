@@ -198,8 +198,8 @@ Presets: `close_tab`, `close_tab_mdi`, `close_window`, `browser_back`, `browser_
 
 ## Releasing (automated deployment)
 
-- `.github/workflows/ci.yml` runs on every push to `main` and on pull requests, entirely on Linux: `nmm-core` and the Linux daemon are built, unit-tested and clippy-checked (arm64 as a non-blocking extra), and a second job cross-builds the Windows exes, the NSIS installer and the portable zip, so the packaging is checked on every push. The Windows unit tests (`nmm-platform-windows`, `nmm-gui`) run in a non-blocking job that executes the cross-compiled test binaries under Wine; if it is flaky, run `cargo test -p nmm-platform-windows -p nmm-gui` on Windows before releasing. There is no macOS build.
-- `.github/workflows/release.yml` runs when you push a tag. It checks that the tag matches the crate versions, runs the tests, builds the NSIS installer and portable zip on Linux (`windows/installer/package.sh`) and the Linux tarballs for x86_64 and aarch64 (`linux/packaging/package.sh`), and attaches everything plus a combined `SHA256SUMS.txt` to a release.
+- `.github/workflows/ci.yml` runs on every push to `main` and on pull requests, entirely on Linux: `nmm-core` and the Linux daemon are built, unit-tested and clippy-checked, and a second job cross-builds the Windows exes, the NSIS installer and the portable zip, so the packaging is checked on every push. The Windows unit tests (`nmm-platform-windows`, `nmm-gui`) run in a non-blocking job that executes the cross-compiled test binaries under Wine; if it is flaky, run `cargo test -p nmm-platform-windows -p nmm-gui` on Windows before releasing. There is no macOS build.
+- `.github/workflows/release.yml` runs when you push a tag. It checks that the tag matches the crate versions, runs the tests, builds the NSIS installer and portable zip on Linux (`windows/installer/package.sh`) and the the Linux x86_64 tarball (`linux/packaging/package.sh`), and attaches everything plus a combined `SHA256SUMS.txt` to a release.
 
 ```powershell
 # 1. bump `version` in core, windows/*, linux/* (and the path dependency versions)
@@ -207,5 +207,7 @@ Presets: `close_tab`, `close_tab_mdi`, `close_window`, `browser_back`, `browser_
 git tag v0.2.0
 git push origin main --tags
 ```
+
+Every release is also published to GitHub by the `github` job: `scripts/mirror-to-github.sh` appends the new commits to GitHub's `main` with `.github/` removed (builds only run on Forgejo; nothing is force-pushed or rewritten) and pushes the tag, then `scripts/github-release.sh` creates the GitHub release and uploads the same files. One-time setup: add a repository secret `GH_PUSH_TOKEN` on Forgejo (a GitHub token that can push contents and create releases on `mabayhan/not-magick-mouse`). To mirror by hand, run `DRY_RUN=1 sh scripts/mirror-to-github.sh` first to see what would be pushed.
 
 The workflows use standard Actions syntax, so they also run on GitHub, and on Forgejo/Gitea with runners labelled `windows-latest` and `ubuntu-latest`. To refresh the README screenshots run `.\windows\installer\screenshots.ps1` (it uses a throw-away demo config, not yours).
