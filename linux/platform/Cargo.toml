@@ -11,3 +11,5 @@ nmm-core = { version = "0.3.0", path = "../../core" }
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev = "0.13.2"
 x11rb = "0.14.0"
+ksni = { version = "0.3.7", features = ["blocking"] }
+image = { version = "0.25.10", default-features = false, features = ["png"] }

@@ -1,6 +1,6 @@
 # not-magick-mouse
 
-A tiny mouse button remapper for Windows (and, headless, Linux) with a tray icon, a simple config GUI, custom DPI stages and a plain DPI on-screen display. Built for a Razer DeathAdder Elite without Synapse. See `PLAN.md` for design notes.
+A tiny mouse button remapper for Windows and Linux with a tray icon, a simple config GUI, and (on Windows) custom DPI stages and a plain DPI on-screen display. Built for a Razer DeathAdder Elite without Synapse. See `PLAN.md` for design notes.
 
 A fresh install remaps nothing. You map buttons yourself in the GUI.
 
@@ -14,26 +14,33 @@ A fresh install remaps nothing. You map buttons yourself in the GUI.
 
 ```
 core/       platform-independent: config, actions, key names, profile resolution
-windows/    platform (hook, injector, tray, OSD, HID DPI), daemon `nmm`, GUI `nmm-gui`, installer, spike tools
-linux/      platform (evdev/uinput, X11 focus), daemon `nmmd`, packaging (systemd unit, udev rule, install.sh)
+gui/        the settings window `nmm-gui` (egui), shared by Windows and Linux
+windows/    platform (hook, injector, tray, OSD, HID DPI), daemon `nmm`, installer, spike tools
+linux/      platform (evdev/uinput, X11 focus, tray), daemon `nmmd`, packaging (.deb, .rpm, tarball, systemd unit, udev rule)
 ```
 
 ## Install (Linux)
 
-The Linux build is a headless daemon, `nmmd`, driven by the same `config.toml`. There is no GUI or tray yet: edit the file (it reloads within a second). Differences from Windows:
+The Linux build has the same settings window as Windows (`nmm-gui`) and a tray icon. The daemon `nmmd` runs as a systemd user service, shows the tray icon (Enabled, Settings, Reload config, Open config folder, Quit) and remaps the buttons. Download the package for your distribution from the release page:
 
-- It grabs each mouse through evdev and re-emits events through uinput, so it works on X11 and Wayland.
-- App profiles need X11 (or XWayland windows) to see the focused app; `exe` is the process name, e.g. `firefox`. On pure Wayland only the global and per-mouse layers apply.
-- Mouse ids are `vid_xxxx&pid_xxxx`; find yours with `cat /proc/bus/input/devices` or `evtest`.
-- DPI actions are not supported (they are logged and ignored). `win` means the Super key. Browser back/forward send Alt+Left/Right.
+| Distribution | Package | Install |
+|---|---|---|
+| Debian, Ubuntu, Linux Mint, Pop!_OS, ... | `not-magick-mouse_<version>_amd64.deb` | `sudo apt install ./not-magick-mouse_<version>_amd64.deb` |
+| Fedora, RHEL / Rocky / Alma, openSUSE, ... | `not-magick-mouse-<version>-1.x86_64.rpm` | `sudo dnf install ./not-magick-mouse-<version>-1.x86_64.rpm` (`sudo zypper install` on openSUSE) |
+| Any other distribution with systemd (Arch, Void, ...) | `not-magick-mouse-<version>-linux-x86_64.tar.gz` | `tar xzf ...tar.gz && cd not-magick-mouse-* && ./install.sh` (installs into `~/.local`, needs `sudo` once for the udev rule) |
 
-```sh
-tar xzf not-magick-mouse-<version>-linux-x86_64.tar.gz && cd not-magick-mouse-*
-./install.sh                          # installs ~/.local/bin/nmmd, a user service, a udev rule; adds you to `input`
-systemctl --user enable --now nmmd    # after logging out/in once if you were added to `input`
-```
+The packages install `nmmd`, `nmm-gui`, a user service that is enabled for every user (it starts at the next login; or run `systemctl --user enable --now nmmd` right away), a udev rule, an application-menu entry and the icon. The binaries are linked against an old glibc (2.31), so they also run on older distributions such as Debian 11 and RHEL 9. Only x86_64 is built for now.
 
-Build from source: `cargo build --release -p nmm-linux` (binary `target/release/nmmd`), then `BIN=target/release/nmmd linux/packaging/install.sh`.
+Using it: open **not-magick-mouse** from the application menu or the tray icon's Settings entry, pick a button, choose an action, Save. The daemon reloads the file within a second. The config is the same `config.toml` as on Windows, under `~/.config/not-magick-mouse/`.
+
+- **Tray icon:** KDE Plasma, Xfce, Cinnamon, MATE, LXQt and most other desktops show it out of the box. GNOME needs the "AppIndicator and KStatusNotifierItem Support" extension (Debian/Ubuntu package `gnome-shell-extension-appindicator`); without a tray host the daemon keeps remapping and you open Settings from the application menu.
+- It grabs each mouse through evdev and re-emits events through uinput, so it works on X11 and Wayland. The udev rule gives the logged-in user access to mouse devices and `/dev/uinput`; on systems without logind seat ACLs, add yourself to the `input` group instead.
+- App profiles need X11 (or XWayland windows) to see the focused app; `exe` is the process name, e.g. `firefox`. On pure Wayland only the global and per-mouse layers apply, and the app picker in the GUI is empty (type the name instead).
+- Mouse ids are `vid_xxxx&pid_xxxx`; the GUI lists your mice and shows the id.
+- DPI actions and the DPI overlay are Windows-only (hidden in the Linux GUI; a hand-written DPI action in the config is logged and ignored). `win` means the Super key. Browser back/forward send Alt+Left/Right.
+- While the editor waits for you to press a mouse button, remapping pauses so the click reaches the window unchanged.
+
+Build from source: `cargo build --release -p nmm-linux -p nmm-gui`, then `BIN_DIR=target/release linux/packaging/install.sh`. To build the three packages yourself: `sh linux/packaging/package.sh` (needs `dpkg-deb` and `rpmbuild` for the .deb and .rpm; install `cargo-zigbuild` for the old-glibc build).
 
 ## Install (Windows)
 
@@ -198,8 +205,8 @@ Presets: `close_tab`, `close_tab_mdi`, `close_window`, `browser_back`, `browser_
 
 ## Releasing (automated deployment)
 
-- `.github/workflows/ci.yml` runs on every push to `main` and on pull requests, entirely on Linux: `nmm-core` and the Linux daemon are built, unit-tested and clippy-checked, and a second job cross-builds the Windows exes, the NSIS installer and the portable zip, so the packaging is checked on every push. The Windows unit tests (`nmm-platform-windows`, `nmm-gui`) run in a non-blocking job that executes the cross-compiled test binaries under Wine; if it is flaky, run `cargo test -p nmm-platform-windows -p nmm-gui` on Windows before releasing. There is no macOS build.
-- `.github/workflows/release.yml` runs when you push a tag. It checks that the tag matches the crate versions, runs the tests, builds the NSIS installer and portable zip on Linux (`windows/installer/package.sh`) and the the Linux x86_64 tarball (`linux/packaging/package.sh`), and attaches everything plus a combined `SHA256SUMS.txt` to a release.
+- `.github/workflows/ci.yml` runs on every push to `main` and on pull requests, entirely on Linux: `nmm-core`, the Linux daemon and the GUI are built, unit-tested and clippy-checked, a job builds the Linux tarball, .deb and .rpm, and another cross-builds the Windows exes, the NSIS installer and the portable zip, so the packaging is checked on every push. The Windows unit tests (`nmm-platform-windows`, `nmm-gui`) run in a non-blocking job that executes the cross-compiled test binaries under Wine; if it is flaky, run `cargo test -p nmm-platform-windows -p nmm-gui` on Windows before releasing. There is no macOS build.
+- `.github/workflows/release.yml` runs when you push a tag. It checks that the tag matches the crate versions, runs the tests, builds the NSIS installer and portable zip on Linux (`windows/installer/package.sh`) and the Linux x86_64 tarball, .deb and .rpm (`linux/packaging/package.sh`), then the `publish` job creates the Forgejo release through its API (`scripts/forgejo-release.sh`: notes from the commit subjects since the previous tag, files plus a combined `SHA256SUMS.txt` attached). It uses the built-in job token; set a `FORGEJO_TOKEN` repository secret with write access if that token cannot create releases. Forgejo ignores the workflow's `permissions:` block (it only logs a warning).
 
 ```powershell
 # 1. bump `version` in core, windows/*, linux/* (and the path dependency versions)
@@ -210,4 +217,4 @@ git push origin main --tags
 
 Every release is also published to GitHub by the `github` job: `scripts/mirror-to-github.sh` appends the new commits to GitHub's `main` with `.github/` removed (builds only run on Forgejo; nothing is force-pushed or rewritten) and pushes the tag, then `scripts/github-release.sh` creates the GitHub release and uploads the same files. One-time setup: add a repository secret `GH_PUSH_TOKEN` on Forgejo (a GitHub token that can push contents and create releases on `mabayhan/not-magick-mouse`). To mirror by hand, run `DRY_RUN=1 sh scripts/mirror-to-github.sh` first to see what would be pushed.
 
-The workflows use standard Actions syntax, so they also run on GitHub, and on Forgejo/Gitea with runners labelled `windows-latest` and `ubuntu-latest`. To refresh the README screenshots run `.\windows\installer\screenshots.ps1` (it uses a throw-away demo config, not yours).
+The workflows target a Forgejo instance with a Linux runner labelled `ubuntu-latest` (no Windows or ARM runners needed); they stick to actions available on `data.forgejo.org` (`upload/download-artifact@v3`, `actions/checkout`) so no third-party release action is used. To refresh the README screenshots run `.\windows\installer\screenshots.ps1` (it uses a throw-away demo config, not yours).

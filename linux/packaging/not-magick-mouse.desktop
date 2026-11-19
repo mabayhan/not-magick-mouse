@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=not-magick-mouse
+GenericName=Mouse button remapper
+Comment=Remap mouse buttons, per mouse and per application
+Exec=nmm-gui
+Icon=not-magick-mouse
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=mouse;buttons;remap;
+StartupWMClass=not-magick-mouse

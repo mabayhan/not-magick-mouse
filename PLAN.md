@@ -4,7 +4,7 @@ A tiny, resource-efficient mouse button remapper with a tray icon, a simple conf
 
 ## Confirmed requirements
 
-- **OS:** Windows 10/11 only for now. Linux support comes later, so the code is structured to allow it (see Portability).
+- **OS:** Windows 10/11 and Linux (evdev/uinput daemon with a StatusNotifierItem tray; the same egui settings window on both, in `gui/`). See Portability.
 - **Mouse:** Razer DeathAdder Elite. Razer Synapse is already uninstalled.
 - **Language:** Rust.
 - **Default mappings: none.** A fresh install changes no button. The user maps everything through the GUI.
@@ -151,10 +151,10 @@ The Elite changes DPI in firmware, so Windows gets no standard event. The daemon
 - Only show the OSD when the value changes after the first read. Retry opening the device every few seconds if it is unplugged.
 - The OSD text is just `<value> DPI`. Window is shown, then hidden by a timer. No animation.
 
-## Portability (Linux later)
+## Portability (Linux implemented)
 
 - Keep all OS calls behind small traits in `core` (`InputHook`, `Injector`, `FocusWatcher`, `Osd`, `Tray`, `DpiSource`). The Windows crate implements them now.
-- The config format already uses neutral names (buttons, `key:` combos, exe names). Linux would add a backend using evdev/uinput and X11/Wayland focus tracking, plus a different key-code table; combos are stored by key name, not Windows virtual-key code, to make that possible.
+- The config format already uses neutral names (buttons, `key:` combos, exe names). Linux adds a backend using evdev/uinput and X11 focus tracking, plus a different key-code table (`linux/platform`); combos are stored by key name, not Windows virtual-key code, to make that possible.
 - Nothing in `core` may depend on `windows` types.
 
 ## Phases

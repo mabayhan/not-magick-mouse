@@ -37,7 +37,7 @@ fn active_exe(conn: &impl Connection, root: u32, active: u32, pid_atom: u32) -> 
     Ok(exe_name(pid))
 }
 
-fn exe_name(pid: u32) -> Option<String> {
+pub(crate) fn exe_name(pid: u32) -> Option<String> {
     let link = std::fs::read_link(format!("/proc/{pid}/exe")).ok();
     // Strip the " (deleted)" suffix left after an upgrade replaces the binary.
     let name = link.and_then(|p| p.file_name().map(|n| n.to_string_lossy().trim_end_matches(" (deleted)").to_string()));

@@ -1,6 +1,8 @@
 //! One grabbed physical mouse: events are read exclusively, buttons are
 //! remapped, everything else is forwarded unchanged through a uinput clone.
 
+use crate::control::Control;
+use crate::ipc::remap_suspended;
 use crate::output::{Keyboard, VIRTUAL_PREFIX};
 use anyhow::{Context, Result};
 use evdev::uinput::VirtualDevice;
@@ -16,6 +18,7 @@ pub struct Shared {
     pub cfg: RwLock<Config>,
     pub exe: std::sync::Arc<Mutex<Option<String>>>,
     pub kbd: Keyboard,
+    pub ctl: std::sync::Arc<Control>,
 }
 
 const BTN_LEFT: u16 = 0x110;
@@ -135,9 +138,11 @@ fn handle_button(shared: &Shared, key: &str, b: Button, ev: InputEvent, held: &m
     match ev.value() {
         1 => {
             let exe = shared.exe.lock().ok().and_then(|g| g.clone());
+            // Off from the tray, or paused by the GUI while it detects a button: pass everything through.
+            let off = !shared.ctl.enabled.load(std::sync::atomic::Ordering::Relaxed) || remap_suspended();
             let action = match shared.cfg.read() {
-                Ok(cfg) => resolve(&cfg, exe.as_deref(), Some(key), b),
-                Err(_) => Action::Passthrough,
+                Ok(cfg) if !off => resolve(&cfg, exe.as_deref(), Some(key), b),
+                _ => Action::Passthrough,
             };
             held[i] = match &action {
                 Action::Passthrough => Held::No,

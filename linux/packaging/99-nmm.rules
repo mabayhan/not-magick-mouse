@@ -1,3 +1,6 @@
-# Lets members of the "input" group (and the logged-in seat user) create the
-# virtual devices nmmd re-injects events through.
+# Lets the logged-in seat user (and the "input" group) create the virtual devices
+# nmmd re-injects events through.
 KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="input", MODE="0660", TAG+="uaccess", OPTIONS+="static_node=uinput"
+
+# Lets the logged-in seat user read (and grab) mouse event nodes, so nmmd needs no "input" group membership.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_MOUSE}=="1", TAG+="uaccess"

@@ -1,28 +1,27 @@
 //! The daemon: finds mice, grabs them, follows focus, reloads the config.
 
+use crate::control::Control;
 use crate::focus;
+use crate::ipc::lock_instance;
 use crate::mouse::{Shared, is_mouse, is_ours, run_device};
 use crate::output::Keyboard;
-use anyhow::{Context, Result, bail};
+use crate::tray;
+use anyhow::{Context, Result};
 use evdev::Device;
 use nmm_core::config::{Config, default_config_path, saved_config_path};
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime};
 
-fn cfg_path(explicit: &Option<PathBuf>) -> PathBuf {
+pub(crate) fn cfg_path(explicit: &Option<PathBuf>) -> PathBuf {
     explicit.clone().or_else(saved_config_path).unwrap_or_else(default_config_path)
 }
 
 /// Only one daemon may grab the mice. The lock lives as long as the returned file.
 fn single_instance() -> Result<std::fs::File> {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    let f = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(dir.join("nmmd.lock"))?;
-    if f.try_lock().is_err() {
-        bail!("another nmmd is already running");
-    }
-    Ok(f)
+    lock_instance("nmmd").ok_or_else(|| anyhow::anyhow!("another nmmd is already running"))
 }
 
 fn mtime(p: &PathBuf) -> Option<SystemTime> {
@@ -40,7 +39,9 @@ pub fn run(explicit_config: Option<PathBuf>) -> Result<()> {
     let exe = Arc::new(Mutex::new(None));
     focus::spawn(exe.clone());
     let kbd = Keyboard::new().context("virtual keyboard")?;
-    let shared = Arc::new(Shared { cfg: RwLock::new(cfg), exe, kbd });
+    let ctl = Arc::new(Control::new());
+    let shared = Arc::new(Shared { cfg: RwLock::new(cfg), exe, kbd, ctl: ctl.clone() });
+    tray::spawn(ctl.clone(), explicit_config.clone());
     eprintln!("nmmd: config {}", path.display());
 
     // Reload when the file (or the path chosen in the GUI) changes. A broken file keeps the last good config.
@@ -53,7 +54,8 @@ pub fn run(explicit_config: Option<PathBuf>) -> Result<()> {
                 std::thread::sleep(Duration::from_secs(1));
                 let p = cfg_path(&explicit);
                 let now = (p.clone(), mtime(&p));
-                if now == last {
+                let forced = shared.ctl.reload.swap(false, Ordering::Relaxed);
+                if now == last && !forced {
                     continue;
                 }
                 last = now;

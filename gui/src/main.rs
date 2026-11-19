@@ -1,13 +1,14 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod mouse_art;
+mod platform;
 mod theme;
 
 use eframe::egui::{self, Align, Color32, Layout, RichText, Sense, Stroke, vec2};
 use nmm_core::config::{AppDeviceProfile, AppProfile, ButtonMap, Config, DeviceProfile, default_config_path, explicit_config_path, resolve_config_path, set_saved_config_path};
 use nmm_core::keys::Modifier;
 use nmm_core::{Action, Button, Combo, DpiCmd, Preset};
-use nmm_platform_windows::MouseInfo;
+use platform::MouseInfo;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use theme::*;
@@ -15,7 +16,7 @@ use theme::*;
 fn main() -> eframe::Result {
     let forced = explicit_config_path(std::env::args().skip(1)).is_some();
     let path = resolve_config_path(std::env::args().skip(1));
-    if !nmm_platform_windows::single_instance("Local\\not-magick-mouse-gui") {
+    if !platform::single_instance() {
         return Ok(());
     }
     let icon = egui::IconData { rgba: include_bytes!("../icon64.rgba").to_vec(), width: 64, height: 64 };
@@ -31,7 +32,7 @@ fn main() -> eframe::Result {
         opts,
         Box::new(move |cc| {
             theme::apply(&cc.egui_ctx);
-            dark_title_bar(cc);
+            platform::style_window(cc);
             Ok(Box::new(App::new(path, forced)))
         }),
     )
@@ -39,25 +40,6 @@ fn main() -> eframe::Result {
 
 /// What the pages edit. Nothing selected = Global. A mouse alone = that mouse in
 /// every app. An app alone = every mouse in that app. Both = that mouse in that app.
-/// Give the window a dark title bar from the start, with the same colour whether or not
-/// the window has focus (Windows 11 otherwise shows white, then black, then dark grey).
-fn dark_title_bar(cc: &eframe::CreationContext<'_>) {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::Graphics::Dwm::*;
-    let Ok(h) = cc.window_handle() else { return };
-    let RawWindowHandle::Win32(w) = h.as_raw() else { return };
-    let hwnd = HWND(w.hwnd.get() as *mut _);
-    let colorref = |c: egui::Color32| u32::from(c.r()) | (u32::from(c.g()) << 8) | (u32::from(c.b()) << 16);
-    let set = |attr: DWMWINDOWATTRIBUTE, v: u32| unsafe {
-        let _ = DwmSetWindowAttribute(hwnd, attr, &v as *const u32 as *const _, 4);
-    };
-    set(DWMWA_USE_IMMERSIVE_DARK_MODE, 1);
-    set(DWMWA_CAPTION_COLOR, colorref(SIDEBAR)); // Windows 11 only; ignored elsewhere
-    set(DWMWA_BORDER_COLOR, colorref(BORDER));
-    set(DWMWA_TEXT_COLOR, colorref(TEXT));
-}
-
 #[derive(Clone, PartialEq, Default)]
 struct Scope {
     /// Hardware key of a mouse, e.g. `vid_1532&pid_005c`.
@@ -243,7 +225,7 @@ impl App {
             new_exe: String::new(),
             running: Vec::new(),
             adding_app: false,
-            mice: nmm_platform_windows::list_mice(),
+            mice: platform::list_mice(),
             mice_at: Instant::now(),
             dirty: false,
             status,
@@ -360,7 +342,7 @@ impl App {
     fn save(&mut self) {
         match self.cfg.save(&self.path) {
             Ok(()) => {
-                nmm_platform_windows::notify_reload();
+                platform::notify_reload();
                 self.dirty = false;
                 self.note("Saved. The tray app reloaded your settings.", false);
             }
@@ -376,7 +358,7 @@ impl App {
             Some(t) => PathBuf::from(t),
         };
         if !new.is_absolute() {
-            return self.note("Use a full path, e.g. D:\\tools\\nmm\\config.toml", true);
+            return self.note(format!("Use a full path, e.g. {}", platform::EXAMPLE_CONFIG_PATH), true);
         }
         if new == self.path {
             return self.note("That file is already in use.", false);
@@ -407,7 +389,7 @@ impl App {
         };
         self.path = new;
         self.path_text = self.path.display().to_string();
-        nmm_platform_windows::notify_reload();
+        platform::notify_reload();
         self.note(format!("Config file changed ({how})."), false);
     }
 
@@ -429,7 +411,7 @@ impl App {
     }
 
     fn refresh_mice(&mut self) {
-        self.mice = nmm_platform_windows::list_mice();
+        self.mice = platform::list_mice();
         self.mice_at = Instant::now();
     }
 
@@ -515,7 +497,7 @@ impl App {
         if ui.add(egui::Button::new(RichText::new("+  Add app").color(ACCENT)).frame(false)).clicked() {
             self.adding_app = !self.adding_app;
             if self.adding_app {
-                self.running = nmm_platform_windows::list_running_apps();
+                self.running = platform::list_running_apps();
             }
         }
         if self.adding_app {
@@ -531,7 +513,7 @@ impl App {
                 });
                 ui.label(muted("or type its file name"));
                 ui.horizontal(|ui| {
-                    let r = ui.add(egui::TextEdit::singleline(&mut self.new_exe).hint_text("name.exe").desired_width(110.0));
+                    let r = ui.add(egui::TextEdit::singleline(&mut self.new_exe).hint_text(platform::APP_HINT).desired_width(110.0));
                     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     if ui.button("Add").clicked() || enter {
                         pick = Some(std::mem::take(&mut self.new_exe));
@@ -668,7 +650,7 @@ impl App {
         }
 
         // DPI belongs to a mouse (or the global default), not to an app.
-        if app.is_none() {
+        if app.is_none() && platform::HAS_DPI {
             match mouse {
                 None => self.dpi_card(
                     ui,
@@ -689,6 +671,7 @@ impl App {
 
     fn page_settings(&mut self, ui: &mut egui::Ui) {
         self.header(ui, "Settings", "How the tray app behaves.", false);
+        if platform::HAS_DPI {
         theme::card(ui, |ui| {
             section_title(ui, "DPI overlay", "Shown when you press the DPI button.");
             let s = &mut self.cfg.settings;
@@ -715,10 +698,16 @@ impl App {
                 self.dirty = true;
             }
         });
+        }
         theme::card(ui, |ui| {
             section_title(ui, "Startup", "");
-            if ui.checkbox(&mut self.cfg.settings.start_with_windows, "Start with Windows").changed() {
-                self.dirty = true;
+            if cfg!(windows) {
+                if ui.checkbox(&mut self.cfg.settings.start_with_windows, "Start with Windows").changed() {
+                    self.dirty = true;
+                }
+            } else {
+                ui.label("The tray app starts with your session as a systemd user service.");
+                ui.label(muted("Turn that off with: systemctl --user disable nmmd"));
             }
         });
         theme::card(ui, |ui| {
@@ -790,14 +779,16 @@ impl App {
                                 ed.dpi = None;
                             }
                         }
-                        ui.separator();
-                        for (mode, label) in [
-                            (DpiMode::Next, "Change DPI: next stage"),
-                            (DpiMode::Prev, "Change DPI: previous stage"),
-                            (DpiMode::Set, "Change DPI: set to a value"),
-                        ] {
-                            if ui.selectable_label(ed.dpi == Some(mode), label).clicked() {
-                                ed.dpi = Some(mode);
+                        if platform::HAS_DPI {
+                            ui.separator();
+                            for (mode, label) in [
+                                (DpiMode::Next, "Change DPI: next stage"),
+                                (DpiMode::Prev, "Change DPI: previous stage"),
+                                (DpiMode::Set, "Change DPI: set to a value"),
+                            ] {
+                                if ui.selectable_label(ed.dpi == Some(mode), label).clicked() {
+                                    ed.dpi = Some(mode);
+                                }
                             }
                         }
                     });
@@ -837,7 +828,7 @@ impl App {
                     });
                 }
                 Kind::Run => {
-                    ui.add(egui::TextEdit::singleline(&mut ed.run).hint_text("C:\\path\\app.exe arguments").desired_width(f32::INFINITY));
+                    ui.add(egui::TextEdit::singleline(&mut ed.run).hint_text(platform::RUN_HINT).desired_width(f32::INFINITY));
                 }
                 Kind::Passthrough | Kind::Disabled => {}
             }
@@ -1080,12 +1071,12 @@ impl eframe::App for App {
         // also auto-resumes if we vanish.
         if self.detecting {
             if self.suspend_sent.is_none_or(|t| t.elapsed() > Duration::from_secs(2)) {
-                nmm_platform_windows::set_remap_suspended(true);
+                platform::set_remap_suspended(true);
                 self.suspend_sent = Some(Instant::now());
             }
             ctx.request_repaint_after(Duration::from_secs(2));
         } else if self.suspend_sent.take().is_some() {
-            nmm_platform_windows::set_remap_suspended(false);
+            platform::set_remap_suspended(false);
         }
 
         // `NMM_GUI_SHOT=<file.png>`: save a screenshot of the window and exit (README screenshots).
@@ -1108,7 +1099,7 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        nmm_platform_windows::set_remap_suspended(false);
+        platform::set_remap_suspended(false);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
