@@ -37,21 +37,21 @@ Build from source: `cargo build --release -p nmm-linux` (binary `target/release/
 
 ## Install (Windows)
 
-### MSI installer (recommended)
+### Installer (recommended)
 
-Download `not-magick-mouse-<version>-x86_64.msi` and run it (it asks for administrator approval, since it installs to Program Files). The setup wizard lets you choose the install folder and whether to start with Windows, and the last page has a "Start not-magick-mouse now" checkbox (ticked by default). It adds Start Menu shortcuts for the tray app and Settings, and an entry in Settings > Apps for uninstalling. Your config file is never removed.
+Download `not-magick-mouse-<version>-x86_64-setup.exe` and run it (it asks for administrator approval, since it installs to Program Files). The wizard lets you choose the install folder and whether to start with Windows, and the last page has a "Start not-magick-mouse now" checkbox (ticked by default). It adds Start Menu shortcuts for the tray app and Settings, and an entry in Settings > Apps for uninstalling. Your config file is never removed. Upgrading is just running a newer setup. If you installed an older `.msi` version, uninstall it first.
 
-Command-line options (`msiexec` properties):
+Command-line options:
 
 ```powershell
-msiexec /i not-magick-mouse-0.2.0-x86_64.msi /qb                          # basic UI, defaults
-msiexec /i not-magick-mouse-0.2.0-x86_64.msi /qb ADDLOCAL=ALL             # also start with Windows
-msiexec /i not-magick-mouse-0.2.0-x86_64.msi /qb CONFIGPATH="D:\nmm\config.toml"
-msiexec /i not-magick-mouse-0.2.0-x86_64.msi /qb INSTALLDIR="D:\Tools\nmm"
-msiexec /x not-magick-mouse-0.2.0-x86_64.msi /qb                          # uninstall
+.\not-magick-mouse-0.2.0-x86_64-setup.exe /S                              # silent, defaults
+.\not-magick-mouse-0.2.0-x86_64-setup.exe /S /AUTOSTART=1                 # also start with Windows
+.\not-magick-mouse-0.2.0-x86_64-setup.exe /S /CONFIGPATH=D:\nmm\config.toml
+.\not-magick-mouse-0.2.0-x86_64-setup.exe /S /D=D:\Tools\nmm              # /D= must be last
+& "C:\Program Files\not-magick-mouse\uninstall.exe" /S                   # uninstall
 ```
 
-`CONFIGPATH` makes the shortcuts and the autostart entry pass `--config` to the app. Upgrading is just running a newer MSI.
+`/CONFIGPATH` makes the shortcuts and the autostart entry pass `--config` to the app.
 
 ### Portable
 
@@ -66,14 +66,17 @@ cargo build --release -p nmm -p nmm-gui    # target\release\nmm.exe and nmm-gui.
 cargo test -p nmm-core -p nmm-platform-windows -p nmm-gui
 ```
 
-To build the MSI and the portable zip you also need [cargo-wix](https://github.com/volks73/cargo-wix) and the [WiX Toolset v3](https://github.com/wixtoolset/wix3/releases) (the portable `wix314-binaries.zip` works; set the `WIX` environment variable to the folder that contains `bin\candle.exe`):
+### Building the installer (on Linux)
 
-```powershell
-cargo install cargo-wix
-.\installer\package.ps1               # writes dist\*.msi and dist\*-portable.zip
+The installer is an [NSIS](https://nsis.sourceforge.io/) script, so the whole Windows release can be built on Linux (also in WSL or Git Bash with the same tools). The exes are cross-compiled for `x86_64-pc-windows-gnu` with MinGW:
+
+```sh
+sudo apt install gcc-mingw-w64-x86-64-posix binutils-mingw-w64-x86-64 nsis zip
+rustup target add x86_64-pc-windows-gnu
+./windows/installer/package.sh          # writes dist/*-setup.exe, dist/*-portable.zip, SHA256SUMS-windows.txt
 ```
 
-The installer definition is `daemon/wix/main.wxs`.
+The installer definition is `windows/installer/nmm.nsi`.
 
 ## Use
 
@@ -134,7 +137,7 @@ To use another file, in order of priority:
 3. the path you set in the GUI (Settings > "Config file" > Apply). It is remembered in `%USERPROFILE%\.config\not-magick-mouse\location.txt` and both programs follow it. If the file exists it is loaded; otherwise it is created from your current settings. "Default" goes back to the standard location.
 4. the default above
 
-When `--config` or `NMM_CONFIG` is in effect the GUI shows the path read-only, because those override the saved one. The tray menu passes a forced path on to the GUI, and the MSI's `CONFIGPATH` option bakes it into shortcuts and autostart. The GUI shows the file in use at the bottom of its window. If the default file does not exist yet and an older `%APPDATA%\not-magick-mouse\config.toml` does, it is copied over automatically once.
+When `--config` or `NMM_CONFIG` is in effect the GUI shows the path read-only, because those override the saved one. The tray menu passes a forced path on to the GUI, and the installer's `/CONFIGPATH` option bakes it into shortcuts and autostart. The GUI shows the file in use at the bottom of its window. If the default file does not exist yet and an older `%APPDATA%\not-magick-mouse\config.toml` does, it is copied over automatically once.
 
 A broken file never stops remapping: the daemon keeps the last good config and shows the error on the OSD.
 
@@ -195,8 +198,8 @@ Presets: `close_tab`, `close_tab_mdi`, `close_window`, `browser_back`, `browser_
 
 ## Releasing (automated deployment)
 
-- `.github/workflows/ci.yml` runs on every push to `main` and on pull requests. Windows: the full app is built and tested (x64 on `windows-latest`, which is Windows Server 2025 and shares Windows 11's kernel; arm64 on `windows-11-arm`, non-blocking). Linux: `nmm-core` and the Linux daemon are built and unit-tested on `ubuntu-latest` (arm64 on `ubuntu-24.04-arm`, non-blocking). Crates are selected with `-p`, because the Windows crates do not build on Linux. There is no macOS build.
-- `.github/workflows/release.yml` runs when you push a tag. It checks that the tag matches the crate versions, runs the tests, builds the MSI and portable zip (`windows/installer/package.ps1`) and the Linux tarballs for x86_64 and aarch64 (`linux/packaging/package.sh`), and attaches everything plus a combined `SHA256SUMS.txt` to a release.
+- `.github/workflows/ci.yml` runs on every push to `main` and on pull requests. Windows: the full app is built and tested natively (x64 on `windows-latest`, which is Windows Server 2025 and shares Windows 11's kernel; arm64 on `windows-11-arm`, non-blocking). Linux: `nmm-core` and the Linux daemon are built and unit-tested on `ubuntu-latest` (arm64 on `ubuntu-24.04-arm`, non-blocking). Crates are selected with `-p`, because the Windows crates do not build on Linux. A third job cross-builds the Windows installer on Linux so the packaging is checked on every push. There is no macOS build.
+- `.github/workflows/release.yml` runs when you push a tag. It checks that the tag matches the crate versions, runs the tests, builds the NSIS installer and portable zip on Linux (`windows/installer/package.sh`) and the Linux tarballs for x86_64 and aarch64 (`linux/packaging/package.sh`), and attaches everything plus a combined `SHA256SUMS.txt` to a release.
 
 ```powershell
 # 1. bump `version` in core, windows/*, linux/* (and the path dependency versions)
