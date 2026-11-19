@@ -9,6 +9,7 @@
 # against an old glibc (GLIBC=2.31 by default) so they also run on older distributions.
 # The .deb needs dpkg-deb and the .rpm needs rpmbuild; a missing tool skips that package.
 set -eu
+umask 022 # some runners use 000, which dpkg-deb rejects
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 arch=${1:-$(uname -m)}
