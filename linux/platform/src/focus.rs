@@ -15,14 +15,10 @@ pub fn spawn(exe: Arc<Mutex<Option<String>>>) {
                 let root = conn.setup().roots[screen].root;
                 let atom = |name: &[u8]| conn.intern_atom(false, name).ok().and_then(|c| c.reply().ok()).map(|r| r.atom);
                 if let (Some(active), Some(pid_atom)) = (atom(b"_NET_ACTIVE_WINDOW"), atom(b"_NET_WM_PID")) {
-                    loop {
-                        match active_exe(&conn, root, active, pid_atom) {
-                            Ok(n) => {
-                                if let Ok(mut g) = exe.lock() {
-                                    *g = n;
-                                }
-                            }
-                            Err(_) => break, // connection lost: reconnect
+                    // An error means the connection was lost: fall out and reconnect.
+                    while let Ok(n) = active_exe(&conn, root, active, pid_atom) {
+                        if let Ok(mut g) = exe.lock() {
+                            *g = n;
                         }
                         std::thread::sleep(Duration::from_millis(250));
                     }

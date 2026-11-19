@@ -7,10 +7,10 @@ pub fn is_valid_key(name: &str) -> bool {
         let c = n.as_bytes()[0];
         return c.is_ascii_lowercase() || c.is_ascii_digit();
     }
-    if let Some(num) = n.strip_prefix('f') {
-        if let Ok(v) = num.parse::<u8>() {
-            return (1..=24).contains(&v);
-        }
+    if let Some(num) = n.strip_prefix('f')
+        && let Ok(v) = num.parse::<u8>()
+    {
+        return (1..=24).contains(&v);
     }
     NAMED_KEYS.contains(&n.as_str())
 }

@@ -33,15 +33,15 @@ pub fn key_code(name: &str) -> Option<u16> {
             return Some(if c == b'0' { 11 } else { 2 + (c - b'1') as u16 });
         }
     }
-    if let Some(num) = n.strip_prefix('f') {
-        if let Ok(v) = num.parse::<u16>() {
-            return match v {
-                1..=10 => Some(58 + v),
-                11 | 12 => Some(76 + v),
-                13..=24 => Some(170 + v),
-                _ => None,
-            };
-        }
+    if let Some(num) = n.strip_prefix('f')
+        && let Ok(v) = num.parse::<u16>()
+    {
+        return match v {
+            1..=10 => Some(58 + v),
+            11 | 12 => Some(76 + v),
+            13..=24 => Some(170 + v),
+            _ => None,
+        };
     }
     Some(match n.as_str() {
         "enter" => 28,

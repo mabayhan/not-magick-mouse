@@ -298,13 +298,13 @@ pub fn resolve_config_path(args: impl IntoIterator<Item = String>) -> PathBuf {
         return p;
     }
     let path = default_config_path();
-    if !path.exists() {
-        if let Some(old) = legacy_config_path().filter(|o| o.exists()) {
-            if let Some(dir) = path.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            let _ = std::fs::copy(old, &path);
+    if !path.exists()
+        && let Some(old) = legacy_config_path().filter(|o| o.exists())
+    {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
         }
+        let _ = std::fs::copy(old, &path);
     }
     path
 }

@@ -17,22 +17,22 @@ pub fn resolve(cfg: &Config, exe: Option<&str>, device: Option<&str>, button: Bu
     if dev.is_some_and(|d| d.disabled) {
         return Action::Passthrough;
     }
-    if let Some(exe) = exe {
-        if let Some(app) = cfg.apps.iter().find(|a| a.exe.eq_ignore_ascii_case(exe)) {
-            if app.disabled {
+    if let Some(exe) = exe
+        && let Some(app) = cfg.apps.iter().find(|a| a.exe.eq_ignore_ascii_case(exe))
+    {
+        if app.disabled {
+            return Action::Passthrough;
+        }
+        if let Some(ad) = device.and_then(|d| app.device(d)) {
+            if ad.disabled {
                 return Action::Passthrough;
             }
-            if let Some(ad) = device.and_then(|d| app.device(d)) {
-                if ad.disabled {
-                    return Action::Passthrough;
-                }
-                if let Some(a) = ad.buttons.get(button) {
-                    return a.clone();
-                }
-            }
-            if let Some(a) = app.buttons.get(button) {
+            if let Some(a) = ad.buttons.get(button) {
                 return a.clone();
             }
+        }
+        if let Some(a) = app.buttons.get(button) {
+            return a.clone();
         }
     }
     if let Some(a) = dev.and_then(|d| d.buttons.get(button)) {
