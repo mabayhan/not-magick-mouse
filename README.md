@@ -198,7 +198,7 @@ Presets: `close_tab`, `close_tab_mdi`, `close_window`, `browser_back`, `browser_
 
 ## Releasing (automated deployment)
 
-- `.github/workflows/ci.yml` runs on every push to `main` and on pull requests. Windows: the full app is built and tested natively (x64 on `windows-latest`, which is Windows Server 2025 and shares Windows 11's kernel; arm64 on `windows-11-arm`, non-blocking). Linux: `nmm-core` and the Linux daemon are built and unit-tested on `ubuntu-latest` (arm64 on `ubuntu-24.04-arm`, non-blocking). Crates are selected with `-p`, because the Windows crates do not build on Linux. A third job cross-builds the Windows installer on Linux so the packaging is checked on every push. There is no macOS build.
+- `.github/workflows/ci.yml` runs on every push to `main` and on pull requests, entirely on Linux: `nmm-core` and the Linux daemon are built, unit-tested and clippy-checked (arm64 as a non-blocking extra), and a second job cross-builds the Windows exes, the NSIS installer and the portable zip, so the packaging is checked on every push. The Windows unit tests (`nmm-platform-windows`, `nmm-gui`) run in a non-blocking job that executes the cross-compiled test binaries under Wine; if it is flaky, run `cargo test -p nmm-platform-windows -p nmm-gui` on Windows before releasing. There is no macOS build.
 - `.github/workflows/release.yml` runs when you push a tag. It checks that the tag matches the crate versions, runs the tests, builds the NSIS installer and portable zip on Linux (`windows/installer/package.sh`) and the Linux tarballs for x86_64 and aarch64 (`linux/packaging/package.sh`), and attaches everything plus a combined `SHA256SUMS.txt` to a release.
 
 ```powershell
