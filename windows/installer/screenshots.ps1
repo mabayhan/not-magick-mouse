@@ -7,7 +7,7 @@
 #>
 param([string]$Gui = 'target\release\nmm-gui.exe')
 $ErrorActionPreference = 'Stop'
-$root = Split-Path $PSScriptRoot
+$root = Split-Path (Split-Path $PSScriptRoot)
 Set-Location $root
 
 # A demo home so the config path shown in the window is neutral.

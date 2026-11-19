@@ -62,7 +62,7 @@
                     </Component>
                     <Component Id='readme' Guid='*'>
                         <File Id='readme_file' Name='README.md' DiskId='1'
-                              Source='$(sys.SOURCEFILEDIR)..\..\README.md' KeyPath='yes'/>
+                              Source='$(sys.SOURCEFILEDIR)..\..\..\README.md' KeyPath='yes'/>
                     </Component>
                 </Directory>
             </Directory>

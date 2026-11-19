@@ -7,8 +7,8 @@ description = "Tiny mouse button remapper with tray icon and DPI OSD"
 
 [dependencies]
 anyhow = "1.0.104"
-nmm-core = { version = "0.2.0", path = "../core" }
-nmm-platform-windows = { version = "0.2.0", path = "../platform-windows" }
+nmm-core = { version = "0.2.0", path = "../../core" }
+nmm-platform-windows = { version = "0.2.0", path = "../platform" }
 
 [build-dependencies]
 winresource = "0.1.34"

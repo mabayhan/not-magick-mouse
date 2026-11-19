@@ -1,0 +1,14 @@
+[package]
+name = "nmm-linux"
+version = "0.2.0"
+edition = "2024"
+description = "not-magick-mouse daemon for Linux (evdev/uinput)"
+
+[[bin]]
+name = "nmmd"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+nmm-core = { version = "0.2.0", path = "../../core" }
+nmm-platform-linux = { version = "0.2.0", path = "../platform" }

@@ -1,0 +1,11 @@
+[Unit]
+Description=not-magick-mouse button remapper
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/nmmd
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

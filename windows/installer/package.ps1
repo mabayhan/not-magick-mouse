@@ -9,7 +9,7 @@
   If WiX is not on PATH, set the WIX environment variable to the folder that contains bin\candle.exe.
 #>
 $ErrorActionPreference = 'Stop'
-$root = Split-Path $PSScriptRoot
+$root = Split-Path (Split-Path $PSScriptRoot)
 Set-Location $root
 $env:Path += ";$env:USERPROFILE\.cargo\bin"
 

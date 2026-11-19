@@ -1,0 +1,3 @@
+# Lets members of the "input" group (and the logged-in seat user) create the
+# virtual devices nmmd re-injects events through.
+KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="input", MODE="0660", TAG+="uaccess", OPTIONS+="static_node=uinput"

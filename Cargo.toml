@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["core", "platform-windows", "daemon", "gui", "spike"]
+members = [
+    "core",
+    "windows/platform", "windows/daemon", "windows/gui", "windows/spike",
+    "linux/platform", "linux/daemon",
+]
 
 [profile.release]
 opt-level = "z"
