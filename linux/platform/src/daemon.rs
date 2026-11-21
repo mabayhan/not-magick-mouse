@@ -76,6 +76,8 @@ pub fn run(explicit_config: Option<PathBuf>) -> Result<()> {
     let active: Arc<Mutex<HashSet<PathBuf>>> = Arc::default();
     let mut seen: HashSet<PathBuf> = HashSet::new();
     let mut warned: HashSet<PathBuf> = HashSet::new();
+    // Paths whose last attempt failed: logged once, retried every scan.
+    let failed: Arc<Mutex<HashSet<PathBuf>>> = Arc::default();
     loop {
         let mut present = HashSet::new();
         if let Ok(rd) = std::fs::read_dir("/dev/input") {
@@ -85,7 +87,9 @@ pub fn run(explicit_config: Option<PathBuf>) -> Result<()> {
                     continue;
                 }
                 present.insert(p.clone());
-                if seen.contains(&p) {
+                // `seen`: nodes that are not mice. Mice are tracked in `active` while a thread owns them, so a
+                // failed grab (e.g. "busy" while the session is starting) is retried instead of given up on.
+                if seen.contains(&p) || active.lock().is_ok_and(|a| a.contains(&p)) {
                     continue;
                 }
                 let dev = match Device::open(&p) {
@@ -101,18 +105,22 @@ pub fn run(explicit_config: Option<PathBuf>) -> Result<()> {
                         continue;
                     }
                 };
-                seen.insert(p.clone());
                 if is_ours(&dev) || !is_mouse(&dev) {
+                    seen.insert(p.clone());
                     continue;
                 }
                 drop(dev);
                 if let Ok(mut a) = active.lock() {
                     a.insert(p.clone());
                 }
-                let (shared, active) = (shared.clone(), active.clone());
+                let (shared, active, failed) = (shared.clone(), active.clone(), failed.clone());
                 std::thread::spawn(move || {
                     if let Err(e) = run_device(&p, &shared) {
-                        eprintln!("nmmd: {}: {e:#}", p.display());
+                        if failed.lock().is_ok_and(|mut f| f.insert(p.clone())) {
+                            eprintln!("nmmd: {}: {e:#} (will retry)", p.display());
+                        }
+                    } else if let Ok(mut f) = failed.lock() {
+                        f.remove(&p);
                     }
                     if let Ok(mut a) = active.lock() {
                         a.remove(&p);
@@ -122,6 +130,9 @@ pub fn run(explicit_config: Option<PathBuf>) -> Result<()> {
         }
         // Forget unplugged nodes so a re-plugged mouse is picked up again.
         seen.retain(|p| present.contains(p));
+        if let Ok(mut f) = failed.lock() {
+            f.retain(|p| present.contains(p));
+        }
         std::thread::sleep(Duration::from_secs(2));
     }
 }

@@ -91,13 +91,15 @@ pub fn run_device(path: &Path, shared: &Shared) -> Result<()> {
     for b in Button::ALL {
         keys.insert(KeyCode::new(code_of(b))); // any button can be a remap target
     }
+    // Grab first: if another program holds the device this fails before a virtual clone is created,
+    // so the daemon's periodic retry does not churn uinput devices.
+    dev.grab().with_context(|| format!("grab {name} (another program may hold it)"))?;
     let vname = format!("{VIRTUAL_PREFIX} {name}");
     let mut builder = VirtualDevice::builder()?.name(&vname).input_id(dev.input_id()).with_keys(&keys)?;
     if let Some(rel) = dev.supported_relative_axes() {
         builder = builder.with_relative_axes(rel)?;
     }
     let mut out = builder.build()?;
-    dev.grab().with_context(|| format!("grab {name} (another program may hold it)"))?;
     eprintln!("nmmd: remapping {name} ({key}) at {}", path.display());
 
     let mut held = [Held::No; 5];
