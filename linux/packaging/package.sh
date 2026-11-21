@@ -59,7 +59,8 @@ rm -f /etc/udev/rules.d/99-nmm.rules
 udevadm control --reload-rules >/dev/null 2>&1 || true
 udevadm trigger --subsystem-match=misc --subsystem-match=input --action=change >/dev/null 2>&1 || true
 systemctl --global enable nmmd.service >/dev/null 2>&1 || true
-echo "not-magick-mouse: log out and back in (or run: systemctl --user enable --now nmmd), then open it from the application menu."
+echo "not-magick-mouse: if the daemon cannot open your mouse (common on RHEL/Alma/Rocky), run: sudo usermod -aG input \$USER"
+echo "not-magick-mouse: then log out and back in (or run: systemctl --user enable --now nmmd) and open it from the application menu."
 EOS
 cat > "$tree.preun" <<'EOS'
 systemctl --global disable nmmd.service >/dev/null 2>&1 || true

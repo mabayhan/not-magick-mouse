@@ -75,6 +75,7 @@ pub fn run(explicit_config: Option<PathBuf>) -> Result<()> {
     // Hot-plug: scan /dev/input for new pointers.
     let active: Arc<Mutex<HashSet<PathBuf>>> = Arc::default();
     let mut seen: HashSet<PathBuf> = HashSet::new();
+    let mut warned: HashSet<PathBuf> = HashSet::new();
     loop {
         let mut present = HashSet::new();
         if let Ok(rd) = std::fs::read_dir("/dev/input") {
@@ -87,7 +88,19 @@ pub fn run(explicit_config: Option<PathBuf>) -> Result<()> {
                 if seen.contains(&p) {
                     continue;
                 }
-                let Ok(dev) = Device::open(&p) else { continue }; // permissions: not added to `seen`, retried
+                let dev = match Device::open(&p) {
+                    Ok(d) => d,
+                    Err(err) => {
+                        // permissions: not added to `seen`, retried
+                        if err.kind() == std::io::ErrorKind::PermissionDenied && warned.insert(p.clone()) {
+                            eprintln!(
+                                "nmmd: cannot read {}: permission denied; add yourself to the input group (sudo usermod -aG input $USER), then log out and back in",
+                                p.display()
+                            );
+                        }
+                        continue;
+                    }
+                };
                 seen.insert(p.clone());
                 if is_ours(&dev) || !is_mouse(&dev) {
                     continue;

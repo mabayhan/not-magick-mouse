@@ -21,7 +21,7 @@ impl Keyboard {
             keys.insert(KeyCode::new(c));
         }
         let dev = VirtualDevice::builder()
-            .context("cannot open /dev/uinput (see linux/packaging/72-nmm.rules)")?
+            .context("cannot open /dev/uinput: add yourself to the input group (sudo usermod -aG input $USER), then log out and back in")?
             .name(&format!("{VIRTUAL_PREFIX} keyboard"))
             .with_keys(&keys)?
             .build()?;
