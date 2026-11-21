@@ -22,7 +22,8 @@ install -Dm644 "$icon" "$HOME/.local/share/icons/hicolor/256x256/apps/not-magick
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$HOME/.local/share/applications" || true
 command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t "$HOME/.local/share/icons/hicolor" || true
 
-sudo install -Dm644 "$here/99-nmm.rules" /etc/udev/rules.d/99-nmm.rules
+sudo rm -f /etc/udev/rules.d/99-nmm.rules
+sudo install -Dm644 "$here/72-nmm.rules" /etc/udev/rules.d/72-nmm.rules
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=misc --subsystem-match=input --action=change || true
 # Fallback for systems without logind seat ACLs: reading /dev/input/event* then needs the input group.

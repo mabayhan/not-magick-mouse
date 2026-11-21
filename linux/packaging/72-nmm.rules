@@ -1,3 +1,5 @@
+# Must sort before 73-seat-late.rules (which applies the uaccess ACLs) and after 60-input-id.rules (which sets ID_INPUT_MOUSE);
+# a 99- name sets the tag too late and no ACL is created.
 # Lets the logged-in seat user (and the "input" group) create the virtual devices
 # nmmd re-injects events through.
 KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="input", MODE="0660", TAG+="uaccess", OPTIONS+="static_node=uinput"

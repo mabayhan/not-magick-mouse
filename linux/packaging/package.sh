@@ -33,7 +33,7 @@ mkdir -p dist
 stage="dist/$name"
 rm -rf "$stage"
 mkdir -p "$stage"
-cp "$bin/nmmd" "$bin/nmm-gui" "$pk/nmmd.service" "$pk/99-nmm.rules" "$pk/not-magick-mouse.desktop" "$pk/install.sh" README.md "$stage/"
+cp "$bin/nmmd" "$bin/nmm-gui" "$pk/nmmd.service" "$pk/72-nmm.rules" "$pk/not-magick-mouse.desktop" "$pk/install.sh" README.md "$stage/"
 cp assets/icon256.png "$stage/not-magick-mouse.png"
 chmod +x "$stage/install.sh"
 tar -C dist -czf "dist/$name.tar.gz" "$name"
@@ -47,7 +47,7 @@ install -Dm755 "$bin/nmmd" "$tree/usr/bin/nmmd"
 install -Dm755 "$bin/nmm-gui" "$tree/usr/bin/nmm-gui"
 mkdir -p "$tree/usr/lib/systemd/user"
 sed 's#%h/.local/bin/nmmd#/usr/bin/nmmd#' "$pk/nmmd.service" > "$tree/usr/lib/systemd/user/nmmd.service"
-install -Dm644 "$pk/99-nmm.rules" "$tree/usr/lib/udev/rules.d/99-nmm.rules"
+install -Dm644 "$pk/72-nmm.rules" "$tree/usr/lib/udev/rules.d/72-nmm.rules"
 install -Dm644 "$pk/not-magick-mouse.desktop" "$tree/usr/share/applications/not-magick-mouse.desktop"
 install -Dm644 assets/icon256.png "$tree/usr/share/icons/hicolor/256x256/apps/not-magick-mouse.png"
 install -Dm644 README.md "$tree/usr/share/doc/not-magick-mouse/README.md"
@@ -55,6 +55,7 @@ install -Dm644 README.md "$tree/usr/share/doc/not-magick-mouse/README.md"
 # Maintainer scripts, identical for both formats. The user service is enabled for every user
 # (it starts at their next login) and the udev rule is applied right away.
 cat > "$tree.post" <<'EOS'
+rm -f /etc/udev/rules.d/99-nmm.rules
 udevadm control --reload-rules >/dev/null 2>&1 || true
 udevadm trigger --subsystem-match=misc --subsystem-match=input --action=change >/dev/null 2>&1 || true
 systemctl --global enable nmmd.service >/dev/null 2>&1 || true
@@ -140,7 +141,7 @@ fi
 /usr/bin/nmmd
 /usr/bin/nmm-gui
 /usr/lib/systemd/user/nmmd.service
-/usr/lib/udev/rules.d/99-nmm.rules
+/usr/lib/udev/rules.d/72-nmm.rules
 /usr/share/applications/not-magick-mouse.desktop
 /usr/share/icons/hicolor/256x256/apps/not-magick-mouse.png
 /usr/share/doc/not-magick-mouse/README.md
